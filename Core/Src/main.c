@@ -82,6 +82,7 @@ DMA_HandleTypeDef hdma_dac2_ch1;
 TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim4;
+TIM_HandleTypeDef htim7;
 TIM_HandleTypeDef htim8;
 TIM_HandleTypeDef htim15;
 TIM_HandleTypeDef htim16;
@@ -109,6 +110,7 @@ static void MX_ADC1_Init(void);
 static void MX_TIM4_Init(void);
 static void MX_TIM15_Init(void);
 static void MX_TIM16_Init(void);
+static void MX_TIM7_Init(void);
 /* USER CODE BEGIN PFP */
 
 // Simple moving average filter
@@ -159,7 +161,7 @@ float ADC3_MOVING_AVERAGE[5][MA_WINDOW_SIZE];
  * 4 - Heatsink Temprature (TMP236)
  */
 uint16_t Vref = 800; 			//  Reference voltage its compare to output voltage
-uint16_t step_size = 20;
+uint16_t step_size = 0.00125;
 uint16_t OUTPUT_VOLTAGE = 0; 	// Measured voltage 0.2V BIAS
 uint16_t Vout = 0; 				//Voltage comparing to Vref
 uint16_t Vramp = 0; 			// ramp voltage
@@ -187,7 +189,7 @@ float Low_pass_filter(float new_sample, float old_sample);
  * 0 - Output Voltage(0V2 bias)
  *
  */
-uint16_t IMAX2_SUM = 0; // 0.2V BIAS
+float IMAX2_SUM = 0;
 volatile static uint16_t ADC5_DMA_BUFFER;
 
 /* ADC5_MEASRUMENTS[X]
@@ -258,6 +260,7 @@ int main(void)
   MX_USB_Device_Init();
   MX_TIM15_Init();
   MX_TIM16_Init();
+  MX_TIM7_Init();
   /* USER CODE BEGIN 2 */
   // Start PWM for delay time transfer to FPGA
   /*HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1)!=  HAL_OK;
@@ -369,24 +372,16 @@ int main(void)
 	  	                  // Gradually ramp up the output
 	  	              {
 	  	            	  //Start timer that start ramp and pi regulation
+	  	            	HAL_GPIO_WritePin(START_STOP_FPGA_GPIO_Port, START_STOP_FPGA_Pin, 1);
 	  	            	HAL_TIM_Base_Start_IT(&htim15);
 	  	              }
 	  	                  break;
 	  	              case STATE_REGULATION:
 	  	                  // Maintain output voltage/current
-	  	            	  // 20Mhz sample time of regulators Timer 15
+	  	            	  // 10khz sample time of regulators Timer 15
 	  	                  {
 
-	  	                	//PCB_TEMPERATURE = Read_Temperature_ADC();
 
-	  	                	// Stop the ADC to save power, if needed
-
-	  	                   // char buffer[50];
-	  	                 // CDC_Transmit_FS((uint8_t *)&PCB_TEMPERATURE, sizeof(PCB_TEMPERATURE));
-	  	                   // USB_SendString("SET PWM DUTYCYCLE\r\n");
-	  	                    //Set_PWM_DutyCycle(50);
-	  	                      // Use temperature value as needed
-	  	                   // HAL_Delay(1000);
 	  	                  }
 	  	                  break;
 	  	              case STATE_FAULT:
@@ -398,6 +393,11 @@ int main(void)
 	  	            	HAL_GPIO_WritePin(NOT_RST_2_GPIO_Port,NOT_RST_2_Pin, GPIO_PIN_RESET);
 	  	            	HAL_GPIO_WritePin(NOT_RST_3_GPIO_Port,NOT_RST_3_Pin, GPIO_PIN_RESET);
 	  	            	HAL_GPIO_WritePin(NOT_RST_4_GPIO_Port,NOT_RST_4_Pin, GPIO_PIN_RESET);
+	  	            	HAL_GPIO_WritePin(CS_OCD_1_GPIO_Port, CS_OCD_1_Pin, 0);
+	  	            	HAL_GPIO_WritePin(CS_OCD_2_GPIO_Port, CS_OCD_2_Pin, 0);
+	  	            	HAL_TIM_Base_Start(&htim7);
+
+
 	  	            	HAL_TIM_Base_Stop_IT(&htim15);
 	  	            	START = 0;
 	  	              }
@@ -1045,6 +1045,44 @@ static void MX_TIM4_Init(void)
 }
 
 /**
+  * @brief TIM7 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM7_Init(void)
+{
+
+  /* USER CODE BEGIN TIM7_Init 0 */
+
+  /* USER CODE END TIM7_Init 0 */
+
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM7_Init 1 */
+
+  /* USER CODE END TIM7_Init 1 */
+  htim7.Instance = TIM7;
+  htim7.Init.Prescaler = 9;
+  htim7.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim7.Init.Period = 99;
+  htim7.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim7) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim7, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM7_Init 2 */
+
+  /* USER CODE END TIM7_Init 2 */
+
+}
+
+/**
   * @brief TIM8 Initialization Function
   * @param None
   * @retval None
@@ -1534,6 +1572,7 @@ uint8_t Check_Ready()
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
 {
 	// SOFT START RAMP REALISATION
+	//  Ts 10khz
 	if(htim->Instance == TIM15)
 	{
 		if(currentState == STATE_SOFT_START || currentState == STATE_REGULATION )
@@ -1548,6 +1587,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
 		OUTPUT_VOLTAGE = (Low_pass_filter(ADC4_DMA_BUFFER, OUTPUT_VOLTAGE)/4096)*3.3;
 
 		IMAX2_SUM = (Low_pass_filter(ADC5_DMA_BUFFER, IMAX2_SUM)/4096)*3.3;
+
 		float Gv = OUTPUT_VOLTAGE/INPUT_VOLTAGE;
 
 		if(Gv<2) //CZARY
@@ -1559,26 +1599,44 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
 			delay_tr = (M_PI-acos(1/(Gv-1)))/wr;
 			IMIN = 0;
 		}
+		int delay_tr_freq = 1/delay_tr;
+
+		 Update_PWM_Frequency(&htim1, TIM_CHANNEL_1, delay_tr_freq); // Set TIM1 CH1 to freq that is delay tr and send to fpga
+
 
 		FAN_Drive();
 		RAMP();
-		regulatorPI(&IMAX1, &Integral_I, OUTPUT_VOLTAGE, Vramp, LIM_PEAK_POS, LIM_PEAK_NEG, Kp, Ti, 0.000001);
+		regulatorPI(&IMAX1, &Integral_I, OUTPUT_VOLTAGE, Vramp, LIM_PEAK_POS, LIM_PEAK_NEG, Kp, Ti, Ts);
 		delay_hc = (2*C_CAP*OUTPUT_VOLTAGE)/IMAX1;
 
-		HAL_DAC_SetValue(&hdac1, DAC_CHANNEL_1, DAC_ALIGN_12B_R, 2048); // IMAX1
-		HAL_DAC_SetValue(&hdac1, DAC_CHANNEL_2, DAC_ALIGN_12B_R, 2048); // IMAX2
-		HAL_DAC_SetValue(&hdac2, DAC_CHANNEL_1, DAC_ALIGN_12B_R, 2048); // IMIN
+		int delay_hc_freq = 1/delay_hc;
+		Update_PWM_Frequency(&htim8, TIM_CHANNEL_1, delay_hc_freq); // Set TIM8 CH1 o freq that is delay hc and send to fpga
+
+		IMAX2 = IMAX1 + IMAX2_SUM; // IMAX2_SUM signal from FPGA
+		// IMAX1,2 each for branches to make 180 degree shift
+		HAL_DAC_SetValue(&hdac1, DAC_CHANNEL_1, DAC_ALIGN_12B_R, 2048+((int)IMAX1*25)); // IMAX1  1.5V is 0A;  1A is 20mV; 1 bit is 0.8mV; x A * 0.02V / 0.0008V = Value for DAC
+		HAL_DAC_SetValue(&hdac1, DAC_CHANNEL_2, DAC_ALIGN_12B_R, 2048+((int)IMAX2*25)); // IMAX2
+		HAL_DAC_SetValue(&hdac2, DAC_CHANNEL_1, DAC_ALIGN_12B_R, 2048+((int)IMIN*25)); // IMIN
 
 		}
 
 	}
+
+	if (htim->Instance == TIM7)
+	    {
+	        // Turn off OCD pins of currents sensors to reset current sensor
+	        HAL_GPIO_TogglePin(CS_OCD_1_GPIO_Port, CS_OCD_1_Pin);
+	        HAL_GPIO_TogglePin(CS_OCD_2_GPIO_Port, CS_OCD_2_Pin);
+	        // Stop the timer
+	        HAL_TIM_Base_Stop_IT(&htim7);
+	    }
 }
 
 void RAMP()
 {
 				if((Vout-Vref)<1)
 				{
-					Vramp = Vout+Vref*step_size; // ToDo specify step size number
+					Vramp = Vout+Vref*step_size; // 1s ramp 0 to 800V
 				}
 				else if((Vout-Vref)>1)
 				{
