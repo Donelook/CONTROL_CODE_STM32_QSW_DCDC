@@ -80,7 +80,6 @@ DMA_HandleTypeDef hdma_dac1_ch1;
 DMA_HandleTypeDef hdma_dac2_ch1;
 
 TIM_HandleTypeDef htim1;
-TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim4;
 TIM_HandleTypeDef htim7;
 TIM_HandleTypeDef htim8;
@@ -103,7 +102,6 @@ static void MX_ADC5_Init(void);
 static void MX_DAC1_Init(void);
 static void MX_DAC2_Init(void);
 static void MX_TIM1_Init(void);
-static void MX_TIM2_Init(void);
 static void MX_TIM8_Init(void);
 static void MX_UART4_Init(void);
 static void MX_ADC1_Init(void);
@@ -252,7 +250,6 @@ int main(void)
   MX_DAC1_Init();
   MX_DAC2_Init();
   MX_TIM1_Init();
-  MX_TIM2_Init();
   MX_TIM8_Init();
   MX_UART4_Init();
   MX_ADC1_Init();
@@ -329,6 +326,7 @@ int main(void)
 	  	            	  // CUrrent Sensors OCD pin needed to go low in reset condition after fault event
 	  	            	HAL_GPIO_WritePin(CS_OCD_1_GPIO_Port, CS_OCD_1_Pin, GPIO_PIN_SET);
 	  	            	HAL_GPIO_WritePin(CS_OCD_2_GPIO_Port, CS_OCD_2_Pin, GPIO_PIN_SET);
+	  	            	HAL_GPIO_WritePin(RESET_INTERLOCK_GPIO_Port, RESET_INTERLOCK_Pin, GPIO_PIN_SET);
 
 	  	            	  // Start PWM for delay time transfer to FPGA
 	  	            	HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1)!=  HAL_OK;
@@ -395,6 +393,7 @@ int main(void)
 	  	            	HAL_GPIO_WritePin(NOT_RST_4_GPIO_Port,NOT_RST_4_Pin, GPIO_PIN_RESET);
 	  	            	HAL_GPIO_WritePin(CS_OCD_1_GPIO_Port, CS_OCD_1_Pin, 0);
 	  	            	HAL_GPIO_WritePin(CS_OCD_2_GPIO_Port, CS_OCD_2_Pin, 0);
+	  	            	HAL_GPIO_WritePin(RESET_INTERLOCK_GPIO_Port, RESET_INTERLOCK_Pin, 1);
 	  	            	HAL_TIM_Base_Start(&htim7);
 
 
@@ -934,55 +933,6 @@ static void MX_TIM1_Init(void)
 
   /* USER CODE END TIM1_Init 2 */
   HAL_TIM_MspPostInit(&htim1);
-
-}
-
-/**
-  * @brief TIM2 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_TIM2_Init(void)
-{
-
-  /* USER CODE BEGIN TIM2_Init 0 */
-
-  /* USER CODE END TIM2_Init 0 */
-
-  TIM_MasterConfigTypeDef sMasterConfig = {0};
-  TIM_OC_InitTypeDef sConfigOC = {0};
-
-  /* USER CODE BEGIN TIM2_Init 1 */
-
-  /* USER CODE END TIM2_Init 1 */
-  htim2.Instance = TIM2;
-  htim2.Init.Prescaler = 0;
-  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim2.Init.Period = 4294967295;
-  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
-  if (HAL_TIM_PWM_Init(&htim2) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
-  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
-  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sConfigOC.OCMode = TIM_OCMODE_PWM1;
-  sConfigOC.Pulse = 0;
-  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
-  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
-  if (HAL_TIM_PWM_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN TIM2_Init 2 */
-
-  /* USER CODE END TIM2_Init 2 */
-  HAL_TIM_MspPostInit(&htim2);
 
 }
 
@@ -1627,6 +1577,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
 	        // Turn off OCD pins of currents sensors to reset current sensor
 	        HAL_GPIO_TogglePin(CS_OCD_1_GPIO_Port, CS_OCD_1_Pin);
 	        HAL_GPIO_TogglePin(CS_OCD_2_GPIO_Port, CS_OCD_2_Pin);
+	        HAL_GPIO_WritePin(RESET_INTERLOCK_GPIO_Port, RESET_INTERLOCK_Pin, 0);
 	        // Stop the timer
 	        HAL_TIM_Base_Stop_IT(&htim7);
 	    }

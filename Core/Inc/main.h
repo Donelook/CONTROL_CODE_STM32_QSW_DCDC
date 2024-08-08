@@ -93,8 +93,6 @@ void Error_Handler(void);
 #define DEADTIME_HC_GPIO_Port GPIOC
 #define IMAX2_SUM_Pin GPIO_PIN_8
 #define IMAX2_SUM_GPIO_Port GPIOA
-#define FAN_PWMA15_Pin GPIO_PIN_15
-#define FAN_PWMA15_GPIO_Port GPIOA
 #define READY_4_Pin GPIO_PIN_1
 #define READY_4_GPIO_Port GPIOD
 #define READY_3_Pin GPIO_PIN_2
