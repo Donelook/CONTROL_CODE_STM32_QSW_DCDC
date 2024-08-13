@@ -1470,7 +1470,28 @@ void calculateMovingAverage(uint16_t src[5][MA_WINDOW_SIZE], float dst[5][MA_WIN
 
 void Update_PWM_Frequency(TIM_HandleTypeDef *htim, uint32_t channel, uint32_t frequency)
 {
-    uint32_t timer_clock = 150000000;  // Adjust if TIM8 is using a different clock
+	 uint32_t timer_clock = 150000000;  // Assuming a 150 MHz timer clock
+	    uint32_t prescaler = htim->Init.Prescaler + 1;
+	    uint32_t period = (timer_clock / (prescaler * frequency)) - 1;
+
+	    // Ensure period is within valid range
+	    if (period > 65535) {
+	        // Adjust prescaler to bring period within range
+	        prescaler = (prescaler * (period / 65536)) + 1;
+	        period = (timer_clock / (prescaler * frequency)) - 1;
+	        __HAL_TIM_SET_PRESCALER(htim, prescaler - 1);
+	    }
+
+	    // Update the period register (ARR) with double buffering
+	    __HAL_TIM_SET_AUTORELOAD(htim, period);
+
+	    // Set the duty cycle to approximately 50%
+	    uint32_t pulse = period / 2;
+	    __HAL_TIM_SET_COMPARE(htim, channel, pulse);
+
+	    // Manually generate an update event by setting the UG bit in the EGR register
+	    htim->Instance->EGR = TIM_EGR_UG;
+	/*uint32_t timer_clock = 150000000;  // Adjust if TIM8 is using a different clock
     uint32_t prescaler = htim->Init.Prescaler + 1;
     uint32_t period = (timer_clock / (prescaler * frequency)) - 1;
 
@@ -1479,7 +1500,7 @@ void Update_PWM_Frequency(TIM_HandleTypeDef *htim, uint32_t channel, uint32_t fr
 
     // Restart the timer PWM generation
     HAL_TIM_PWM_Stop(htim, channel);
-    HAL_TIM_PWM_Start(htim, channel);
+    HAL_TIM_PWM_Start(htim, channel);*/
 }
 
 void Update_PWM_DutyCycle(TIM_HandleTypeDef *htim, uint32_t channel, uint32_t dutyCycle)
