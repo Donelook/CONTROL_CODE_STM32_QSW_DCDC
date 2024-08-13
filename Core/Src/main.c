@@ -165,7 +165,7 @@ uint16_t Vout = 0; 				//Voltage comparing to Vref
 uint16_t Vramp = 0; 			// ramp voltage
 volatile static uint16_t ADC4_DMA_BUFFER;
 volatile static uint16_t ADC4_MEASURMENTS;
-void RAMP();
+uint8_t RAMP();
 void regulatorPI(float *out, float *integral, float in, float in_zad, float limp, float limn, float kp, float ti, float Ts1);
 float delay_tr = 0;
 float delay_hc = 0;
@@ -210,7 +210,6 @@ uint8_t START = 0;
 uint8_t CLEAR = 0;
 ConverterEvent event;
 ConverterState currentState = STATE_INIT;
-
 
 /* USER CODE END 0 */
 
@@ -301,7 +300,7 @@ int main(void)
      // Update_PWM_DutyCycle(&htim8, TIM_CHANNEL_2, htim8.Init.Period / 2);
   while (1)
   {
-	   ConverterEvent event;
+
 	  	          if (HAL_GPIO_ReadPin(INTERLOCK_GPIO_Port, INTERLOCK_Pin) == 1 && START && Check_Faults()   && Check_Ready()/* start condition */) {
 	  	        	//USB_SendString("State: EVENT START \r\n");
 	  	              event = EVENT_START;
@@ -1368,7 +1367,7 @@ ConverterState handle_event(ConverterState currentState, ConverterEvent event) {
             if (event == EVENT_FAULT)
             {
                 return STATE_FAULT;
-            } else if (1) {
+            } else if (RAMP()) {
                 return STATE_REGULATION;
             }
             break;
@@ -1555,7 +1554,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
 
 
 		FAN_Drive();
-		RAMP();
+		if(currentState == STATE_SOFT_START) RAMP();
 		regulatorPI(&IMAX1, &Integral_I, OUTPUT_VOLTAGE, Vramp, LIM_PEAK_POS, LIM_PEAK_NEG, Kp, Ti, Ts);
 		delay_hc = (2*C_CAP*OUTPUT_VOLTAGE)/IMAX1;
 
@@ -1575,6 +1574,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
 	if (htim->Instance == TIM7)
 	    {
 	        // Turn off OCD pins of currents sensors to reset current sensor
+
 	        HAL_GPIO_TogglePin(CS_OCD_1_GPIO_Port, CS_OCD_1_Pin);
 	        HAL_GPIO_TogglePin(CS_OCD_2_GPIO_Port, CS_OCD_2_Pin);
 	        HAL_GPIO_WritePin(RESET_INTERLOCK_GPIO_Port, RESET_INTERLOCK_Pin, 0);
@@ -1583,15 +1583,18 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
 	    }
 }
 
-void RAMP()
+uint8_t RAMP()
 {
+	// RAMP Voltage to soft-start
 				if((Vout-Vref)<1)
 				{
 					Vramp = Vout+Vref*step_size; // 1s ramp 0 to 800V
+					return 0; // not finish ramp
 				}
 				else if((Vout-Vref)>1)
 				{
-					Vramp = Vout-Vref*step_size;
+					Vramp = Vref;
+					return 1; // Finished ramp
 				}
 
 }
@@ -1661,20 +1664,29 @@ float Low_pass_filter(float new_sample, float old_sample)
 void FAN_Drive()
 {
 	int duty_cycle = 20;
-	float temperature = 20;
-	PCB_TEMP = (PCB_TEMP-0.4)/0.0195;
-	HEAT_SINK_TEMP = (HEAT_SINK_TEMP-0.5)/0.01;
-	if(PCB_TEMP>HEAT_SINK_TEMP) temperature = PCB_TEMP;
-	if(PCB_TEMP<HEAT_SINK_TEMP) temperature = HEAT_SINK_TEMP;
+		float temperature = 20;
+		PCB_TEMP = (PCB_TEMP-0.4)/0.0195;
+		HEAT_SINK_TEMP = (HEAT_SINK_TEMP-0.5)/0.01;
 
-	duty_cycle = 20 + ((temperature - 20) / 80) * 79;
-	if (PCB_TEMP < 20 || HEAT_SINK_TEMP < 20 ) {
-	        duty_cycle=20;
-	    } else if (PCB_TEMP > 100 || HEAT_SINK_TEMP > 100) {
-	    	duty_cycle=99;
-	    }
+		// Choose the higher of the two temperatures
+		temperature = (PCB_TEMP > HEAT_SINK_TEMP) ? PCB_TEMP : HEAT_SINK_TEMP;
 
-	Set_PWM_DutyCycle(duty_cycle);
+		// Apply a non-linear (exponential) scaling for the fan speed
+		// This scales the temperature to a value between 0 and 1, then applies an exponential curve
+		float normalized_temp = (temperature - 20) / 80;  // Normalizing between 0 (20°C) and 1 (100°C)
+		if (normalized_temp > 1.0) normalized_temp = 1.0;
+		if (normalized_temp < 0.0) normalized_temp = 0.0;
+
+		duty_cycle = 20 + (int)(pow(normalized_temp, 3) * 79);  // Cubic curve for fan speed control
+
+		// Enforce minimum and maximum duty cycles
+		if (temperature < 20) {
+		        duty_cycle = 20;
+		} else if (temperature > 100) {
+		    	duty_cycle = 99;
+		}
+
+		Set_PWM_DutyCycle(duty_cycle);
 
 }
 
