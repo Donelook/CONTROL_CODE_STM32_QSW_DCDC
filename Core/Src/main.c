@@ -57,7 +57,7 @@ typedef enum {
 #define C_CAP 0.0000000022 		// 2.2nF
 #define wr sqrt(L_IND*C_CAP)		// Omega of LC resonance
 #define Z sqrt(L_IND/(2*C_CAP)) // impedance of inductor and two capacitor on Dren-Source MOSFETs
-#define Ts 0.0001			// Sampling rate of control loop 10khz
+#define Ts 0.0004			// Sampling rate of control loop 24khz
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -160,7 +160,7 @@ float ADC3_MOVING_AVERAGE[5][MA_WINDOW_SIZE];
  */
 uint16_t Vref = 800; 			//  Reference voltage its compare to output voltage
 uint16_t step_size = 0.00125;
-uint16_t OUTPUT_VOLTAGE = 0; 	// Measured voltage 0.2V BIAS
+float OUTPUT_VOLTAGE = 0; 	// Measured voltage 0.2V BIAS
 uint16_t Vout = 0; 				//Voltage comparing to Vref
 uint16_t Vramp = 0; 			// ramp voltage
 volatile static uint16_t ADC4_DMA_BUFFER;
@@ -195,7 +195,15 @@ volatile static uint16_t ADC5_DMA_BUFFER;
  *
  */
 
-
+// USB INTERFACE DISPLAY AND SET
+// Buffer to hold incoming data
+uint8_t USB_RX_Buffer[64];
+uint8_t USB_TX_Buffer[128];
+void SendUSBMessage(const char* message);
+void CDC_Receive_FS(uint8_t* Buf, uint32_t *Len);
+void ParseUSBCommand(void);
+void DisplayAllVariables(void);
+volatile uint8_t dataReceivedFlag = 0; // Flags to indicate new data received
 
 
 //Regulator PI
@@ -300,6 +308,8 @@ int main(void)
      // Update_PWM_DutyCycle(&htim8, TIM_CHANNEL_2, htim8.Init.Period / 2);
   while (1)
   {
+
+	  	  	  	  ParseUSBCommand(); // Process incoming USB commands
 
 	  	          if (HAL_GPIO_ReadPin(INTERLOCK_GPIO_Port, INTERLOCK_Pin) == 1 && START && Check_Faults()   && Check_Ready()/* start condition */) {
 	  	        	//USB_SendString("State: EVENT START \r\n");
@@ -1122,9 +1132,9 @@ static void MX_TIM15_Init(void)
 
   /* USER CODE END TIM15_Init 1 */
   htim15.Instance = TIM15;
-  htim15.Init.Prescaler = 0;
+  htim15.Init.Prescaler = 2999;
   htim15.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim15.Init.Period = 6;
+  htim15.Init.Period = 1;
   htim15.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim15.Init.RepetitionCounter = 0;
   htim15.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
@@ -1574,8 +1584,10 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
 		 Update_PWM_Frequency(&htim1, TIM_CHANNEL_1, delay_tr_freq); // Set TIM1 CH1 to freq that is delay tr and send to fpga
 
 
-		FAN_Drive();
-		if(currentState == STATE_SOFT_START) RAMP();
+		FAN_Drive(); // Control Fan speed dpend on two temperatures pcb and radiator
+
+		if(currentState == STATE_SOFT_START) RAMP(); // Adding to Vramp stepping voltage to create starting ramp
+
 		regulatorPI(&IMAX1, &Integral_I, OUTPUT_VOLTAGE, Vramp, LIM_PEAK_POS, LIM_PEAK_NEG, Kp, Ti, Ts);
 		delay_hc = (2*C_CAP*OUTPUT_VOLTAGE)/IMAX1;
 
@@ -1610,7 +1622,7 @@ uint8_t RAMP()
 				if((Vout-Vref)<1)
 				{
 					Vramp = Vout+Vref*step_size; // 1s ramp 0 to 800V
-					return 0; // not finish ramp
+					return 0; // not finished ramp
 				}
 				else if((Vout-Vref)>1)
 				{
@@ -1709,6 +1721,145 @@ void FAN_Drive()
 
 		Set_PWM_DutyCycle(duty_cycle);
 
+}
+
+
+void CDC_Receive_FS(uint8_t* Buf, uint32_t *Len) {
+    memcpy(USB_RX_Buffer, Buf, *Len);
+    dataReceivedFlag = 1;
+}
+
+void SendUSBMessage(const char* message) {
+    uint16_t len = strlen(message);
+    if (len > 127) len = 127;  // Limit to buffer size
+    memcpy(USB_TX_Buffer, message, len);
+    USB_TX_Buffer[len] = '\0';  // Ensure null-terminated string
+    CDC_Transmit_FS(USB_TX_Buffer, len);
+}
+
+void ParseUSBCommand(void) {
+	 if (dataReceivedFlag) {
+	        if (strncmp((char*)USB_RX_Buffer, "SET_KP", 6) == 0) {
+	            sscanf((char*)USB_RX_Buffer, "SET_KP %f", &Kp);
+	            SendUSBMessage("KP Updated\n");
+
+	        } else if (strncmp((char*)USB_RX_Buffer, "SET_Ti", 6) == 0) {
+	            sscanf((char*)USB_RX_Buffer, "SET_Ti %f", &Ti);
+	            SendUSBMessage("Ti Updated\n");
+
+	        } else if (strncmp((char*)USB_RX_Buffer, "SET_VREF", 8) == 0) {
+	            sscanf((char*)USB_RX_Buffer, "SET_VREF %hu", &Vref);
+	            SendUSBMessage("Vref Updated\n");
+
+	        } else if (strncmp((char*)USB_RX_Buffer, "SET_CS1_VREF", 12) == 0) {
+	            sscanf((char*)USB_RX_Buffer, "SET_CS1_VREF %f", &CURRENT_SENSOR1_VREF);
+	            SendUSBMessage("CURRENT_SENSOR1_VREF Updated\n");
+
+	        } else if (strncmp((char*)USB_RX_Buffer, "SET_CS2_VREF", 12) == 0) {
+	            sscanf((char*)USB_RX_Buffer, "SET_CS2_VREF %f", &CURRENT_SENSOR2_VREF);
+	            SendUSBMessage("CURRENT_SENSOR2_VREF Updated\n");
+
+	        } else if (strncmp((char*)USB_RX_Buffer, "SET_IMAX2_SUM", 13) == 0) {
+	            sscanf((char*)USB_RX_Buffer, "SET_IMAX2_SUM %f", &IMAX2_SUM);
+	            SendUSBMessage("IMAX2_SUM Updated\n");
+
+	        } else if (strncmp((char*)USB_RX_Buffer, "SET_DELAY_TR", 12) == 0) {
+	            sscanf((char*)USB_RX_Buffer, "SET_DELAY_TR %f", &delay_tr);
+	            SendUSBMessage("delay_tr Updated\n");
+
+	        } else if (strncmp((char*)USB_RX_Buffer, "SET_DELAY_HC", 12) == 0) {
+	            sscanf((char*)USB_RX_Buffer, "SET_DELAY_HC %f", &delay_hc);
+	            SendUSBMessage("delay_hc Updated\n");
+
+	        } else if (strncmp((char*)USB_RX_Buffer, "GET_KP", 6) == 0) {
+	            sprintf((char*)USB_TX_Buffer, "KP = %f\n", Kp);
+	            SendUSBMessage((char*)USB_TX_Buffer);
+
+	        } else if (strncmp((char*)USB_RX_Buffer, "GET_Ti", 6) == 0) {
+	            sprintf((char*)USB_TX_Buffer, "Ti = %f\n", Ti);
+	            SendUSBMessage((char*)USB_TX_Buffer);
+
+	        } else if (strncmp((char*)USB_RX_Buffer, "GET_VREF", 8) == 0) {
+	            sprintf((char*)USB_TX_Buffer, "Vref = %hu\n", Vref);
+	            SendUSBMessage((char*)USB_TX_Buffer);
+
+	        } else if (strncmp((char*)USB_RX_Buffer, "GET_CS1_VREF", 12) == 0) {
+	            sprintf((char*)USB_TX_Buffer, "CURRENT_SENSOR1_VREF = %f\n", CURRENT_SENSOR1_VREF);
+	            SendUSBMessage((char*)USB_TX_Buffer);
+
+	        } else if (strncmp((char*)USB_RX_Buffer, "GET_CS2_VREF", 12) == 0) {
+	            sprintf((char*)USB_TX_Buffer, "CURRENT_SENSOR2_VREF = %f\n", CURRENT_SENSOR2_VREF);
+	            SendUSBMessage((char*)USB_TX_Buffer);
+
+	        } else if (strncmp((char*)USB_RX_Buffer, "GET_IMAX2_SUM", 13) == 0) {
+	            sprintf((char*)USB_TX_Buffer, "IMAX2_SUM = %f\n", IMAX2_SUM);
+	            SendUSBMessage((char*)USB_TX_Buffer);
+
+	        } else if (strncmp((char*)USB_RX_Buffer, "GET_DELAY_TR", 12) == 0) {
+	            sprintf((char*)USB_TX_Buffer, "delay_tr = %f\n", delay_tr);
+	            SendUSBMessage((char*)USB_TX_Buffer);
+
+	        } else if (strncmp((char*)USB_RX_Buffer, "GET_DELAY_HC", 12) == 0) {
+	            sprintf((char*)USB_TX_Buffer, "delay_hc = %f\n", delay_hc);
+	            SendUSBMessage((char*)USB_TX_Buffer);
+
+	        } else if (strncmp((char*)USB_RX_Buffer, "DISPLAY_ALL", 11) == 0) {
+	            DisplayAllVariables();
+
+	        } else {
+	            SendUSBMessage("Unknown Command\n");
+	        }
+	        dataReceivedFlag = 0;
+	    }
+}
+
+void DisplayAllVariables(void) {
+    char buffer[128];
+
+    sprintf(buffer, "KP = %f\n", Kp);
+        SendUSBMessage(buffer);
+
+        sprintf(buffer, "Ti = %f\n", Ti);
+        SendUSBMessage(buffer);
+
+        sprintf(buffer, "Vref = %hu\n", Vref);
+        SendUSBMessage(buffer);
+
+        sprintf(buffer, "IMAX1 = %f\n", IMAX1);
+        SendUSBMessage(buffer);
+
+        sprintf(buffer, "IMAX2 = %f\n", IMAX2);
+        SendUSBMessage(buffer);
+
+        sprintf(buffer, "IMIN = %f\n", IMIN);
+        SendUSBMessage(buffer);
+
+        sprintf(buffer, "INPUT_VOLTAGE = %f\n", INPUT_VOLTAGE);
+        SendUSBMessage(buffer);
+
+        sprintf(buffer, "OUTPUT_VOLTAGE = %f\n", OUTPUT_VOLTAGE);
+        SendUSBMessage(buffer);
+
+        sprintf(buffer, "PCB_TEMP = %f\n", PCB_TEMP);
+        SendUSBMessage(buffer);
+
+        sprintf(buffer, "HEAT_SINK_TEMP = %f\n", HEAT_SINK_TEMP);
+        SendUSBMessage(buffer);
+
+        sprintf(buffer, "CURRENT_SENSOR1_VREF = %f\n", CURRENT_SENSOR1_VREF);
+        SendUSBMessage(buffer);
+
+        sprintf(buffer, "CURRENT_SENSOR2_VREF = %f\n", CURRENT_SENSOR2_VREF);
+        SendUSBMessage(buffer);
+
+        sprintf(buffer, "IMAX2_SUM = %f\n", IMAX2_SUM);
+        SendUSBMessage(buffer);
+
+        sprintf(buffer, "delay_tr = %f\n", delay_tr);
+        SendUSBMessage(buffer);
+
+        sprintf(buffer, "delay_hc = %f\n", delay_hc);
+        SendUSBMessage(buffer);
 }
 
 /* USER CODE END 4 */
