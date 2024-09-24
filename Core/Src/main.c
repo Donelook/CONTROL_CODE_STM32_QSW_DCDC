@@ -57,7 +57,7 @@ typedef enum {
 #define C_CAP 0.0000000022 		// 2.2nF
 #define wr sqrt(L_IND*C_CAP)		// Omega of LC resonance
 #define Z sqrt(L_IND/(2*C_CAP)) // impedance of inductor and two capacitor on Dren-Source MOSFETs
-#define Ts 0.0004			// Sampling rate of control loop 24khz
+#define Ts 0.00005			// Sampling rate of control loop 20khz
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
