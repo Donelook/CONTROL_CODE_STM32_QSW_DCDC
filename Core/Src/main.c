@@ -19,6 +19,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "usb_device.h"
+#include <stdio.h>"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -167,8 +168,8 @@ volatile static uint16_t ADC4_DMA_BUFFER;
 volatile static uint16_t ADC4_MEASURMENTS;
 uint8_t RAMP();
 void regulatorPI(float *out, float *integral, float in, float in_zad, float limp, float limn, float kp, float ti, float Ts1);
-float delay_tr = 0;
-float delay_hc = 0;
+float delay_tr = 0; // DELAY/DEADTIME after first stage inductor  positive ramp
+float delay_hc = 0; // DELAY/DEADTIME after second stage inductor negative ramp
 
 //Filter butterworth 500khz sampleing rate 200khz cutoff
 /*#define N 4 // Order of the filter
@@ -187,13 +188,17 @@ float Low_pass_filter(float new_sample, float old_sample);
  * 0 - Output Voltage(0V2 bias)
  *
  */
-float IMAX2_SUM = 0;
-volatile static uint16_t ADC5_DMA_BUFFER;
+
+
 
 /* ADC5_MEASRUMENTS[X]
  * 0 - IMAX2_SUM
  *
  */
+float IMAX2_SUM = 0;
+volatile static uint16_t ADC5_DMA_BUFFER[MA_WINDOW_SIZE];
+volatile static uint32_t ADC5_MEASURMENTS[MA_WINDOW_SIZE];
+float ADC5_MOVING_AVERAGE;
 
 // USB INTERFACE DISPLAY AND SET
 // Buffer to hold incoming data
@@ -209,7 +214,7 @@ volatile uint8_t dataReceivedFlag = 0; // Flags to indicate new data received
 //Regulator PI
 float Kp = 0.15; 			// Proportional part of PI
 float Ti = 0.005; 			// Integral part of PI
-float LIM_PEAK_POS = 70; 	// Positive limit for PI regulator
+float LIM_PEAK_POS = 40; 	// Positive limit for PI regulator
 float LIM_PEAK_NEG = -4; 	// Negative limit for PI regulator
 float Integral_I = 0;		// Integral part of PI
 float prev_delta = 0; 		// buffer  error n-1
@@ -564,7 +569,7 @@ static void MX_ADC3_Init(void)
   /** Common config
   */
   hadc3.Instance = ADC3;
-  hadc3.Init.ClockPrescaler = ADC_CLOCK_ASYNC_DIV4;
+  hadc3.Init.ClockPrescaler = ADC_CLOCK_ASYNC_DIV10;
   hadc3.Init.Resolution = ADC_RESOLUTION_12B;
   hadc3.Init.DataAlign = ADC_DATAALIGN_RIGHT;
   hadc3.Init.GainCompensation = 0;
@@ -674,7 +679,7 @@ static void MX_ADC4_Init(void)
   /** Common config
   */
   hadc4.Instance = ADC4;
-  hadc4.Init.ClockPrescaler = ADC_CLOCK_ASYNC_DIV4;
+  hadc4.Init.ClockPrescaler = ADC_CLOCK_ASYNC_DIV10;
   hadc4.Init.Resolution = ADC_RESOLUTION_12B;
   hadc4.Init.DataAlign = ADC_DATAALIGN_RIGHT;
   hadc4.Init.GainCompensation = 0;
@@ -733,7 +738,7 @@ static void MX_ADC5_Init(void)
   /** Common config
   */
   hadc5.Instance = ADC5;
-  hadc5.Init.ClockPrescaler = ADC_CLOCK_ASYNC_DIV4;
+  hadc5.Init.ClockPrescaler = ADC_CLOCK_ASYNC_DIV10;
   hadc5.Init.Resolution = ADC_RESOLUTION_12B;
   hadc5.Init.DataAlign = ADC_DATAALIGN_RIGHT;
   hadc5.Init.GainCompensation = 0;
@@ -747,7 +752,11 @@ static void MX_ADC5_Init(void)
   hadc5.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
   hadc5.Init.DMAContinuousRequests = ENABLE;
   hadc5.Init.Overrun = ADC_OVR_DATA_PRESERVED;
-  hadc5.Init.OversamplingMode = DISABLE;
+  hadc5.Init.OversamplingMode = ENABLE;
+  hadc5.Init.Oversampling.Ratio = ADC_OVERSAMPLING_RATIO_256;
+  hadc5.Init.Oversampling.RightBitShift = ADC_RIGHTBITSHIFT_8;
+  hadc5.Init.Oversampling.TriggeredMode = ADC_TRIGGEREDMODE_SINGLE_TRIGGER;
+  hadc5.Init.Oversampling.OversamplingStopReset = ADC_REGOVERSAMPLING_CONTINUED_MODE;
   if (HAL_ADC_Init(&hadc5) != HAL_OK)
   {
     Error_Handler();
@@ -1440,24 +1449,20 @@ void Set_PWM_DutyCycle(uint32_t dutyCycle) {
 //ADC save to array and moving average
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 {
-    /*if (hadc->Instance == ADC3)
-    {
-        for (int i = 0; i < MA_WINDOW_SIZE; i++)
-        {
-            for (int ch = 0; ch < 5; ch++)
-            {
-                ADC3_MEASURMENTS[ch][i] = ADC3_DMA_BUFFER[i * 5 + ch];
-            }
-        }
+	if (hadc->Instance == ADC5)
+		    {
+		        uint32_t sum = 0;
+		        for (int i = 0; i < MA_WINDOW_SIZE; i++)
+		        {
+		            sum += ADC5_DMA_BUFFER[i];
+		        }
+		        ADC5_MOVING_AVERAGE = (((float)sum / MA_WINDOW_SIZE)/4096)*3.3;
 
+		       // adc5_data_ready = 1; // Set flag to indicate new data is ready
 
-    }
-    if (hadc->Instance == ADC4)
-        {
-
-           ADC4_MEASURMENTS = ADC4_DMA_BUFFER;
-
-        }*/
+		        // Restart the DMA transfer
+		        HAL_ADC_Start_DMA(hadc, (uint32_t*)ADC5_DMA_BUFFER, MA_WINDOW_SIZE);
+		    }
 }
 
 void calculateMovingAverage(uint16_t src[5][MA_WINDOW_SIZE], float dst[5][MA_WINDOW_SIZE])
@@ -1566,14 +1571,13 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
 		INPUT_VOLTAGE = (Low_pass_filter(ADC3_DMA_BUFFER[2], INPUT_VOLTAGE)/4096)*3.3;
 		OUTPUT_VOLTAGE = (Low_pass_filter(ADC4_DMA_BUFFER, OUTPUT_VOLTAGE)/4096)*3.3;
 
-		IMAX2_SUM = (Low_pass_filter(ADC5_DMA_BUFFER, IMAX2_SUM)/4096)*3.3;
-
+		IMAX2_SUM = ADC5_MOVING_AVERAGE*0.384; // 0.20V - -0.5A || 1.45v - 0A || 2.77V - 0.5A		0.384 A/V
 		float Gv = OUTPUT_VOLTAGE/INPUT_VOLTAGE;
 
 		if(Gv<2) //CZARY
 		{
 			delay_tr = acos(1-Gv)/wr;
-			IMIN = OUTPUT_VOLTAGE*sqrt((2-Gv)/Gv)/Z; // Negative current needed to Zero voltage switching
+			IMIN = OUTPUT_VOLTAGE*sqrt((2-Gv)/Gv)/Z; // Negative current needed to Zero voltage switching in resonance
 		} else if(Gv>=2)
 		{
 			delay_tr = (M_PI-acos(1/(Gv-1)))/wr;
