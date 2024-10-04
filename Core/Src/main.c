@@ -19,7 +19,6 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "usb_device.h"
-#include <stdio.h>"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -52,7 +51,6 @@ typedef enum {
 /* USER CODE BEGIN PD */
 #define MA_WINDOW_SIZE 10  		// Moving average window
 #define BUFFER_SIZE 100  		// Buffer size for DAC test - not used in final program
-#define M_PI 3.14159
 #define res12_b 4096
 #define L_IND 0.000094 			// 94uH
 #define C_CAP 0.0000000022 		// 2.2nF
@@ -343,11 +341,11 @@ int main(void)
 	  	            	HAL_GPIO_WritePin(RESET_INTERLOCK_GPIO_Port, RESET_INTERLOCK_Pin, GPIO_PIN_SET);
 
 	  	            	  // Start PWM for delay time transfer to FPGA
-	  	            	HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1)!=  HAL_OK;
-	  	            	HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_2)!=  HAL_OK;
+	  	            	HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
+	  	            	HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_2);
 
 	  	            	// Timer for clear fault  event to reset current sensor by pull down OCD pins
-	  	            	HAL_TIM_PWM_Start(&htim16, TIM_CHANNEL_1)!=  HAL_OK;
+	  	            	HAL_TIM_PWM_Start(&htim16, TIM_CHANNEL_1);
 	  	            	  //DAC for  current reference
 	  	            	  ///DAC1_OUT1 	- MAX1
 	  	            	  //DAC1_OUT2 	- MAX2
@@ -384,7 +382,8 @@ int main(void)
 	  	                  // Gradually ramp up the output
 	  	              {
 	  	            	  //Start timer that start ramp and pi regulation
-	  	            	HAL_GPIO_WritePin(START_STOP_FPGA_GPIO_Port, START_STOP_FPGA_Pin, 1);
+	  	            //	HAL_GPIO_WritePin(RESET_FPGA_GPIO_Port, RESET_FPGA_GPIO_Port, 0); // RESET =  1  = reset turn on
+	  	            //	HAL_GPIO_WritePin(START_STOP_FPGA_GPIO_Port, START_STOP_FPGA_Pin, 1);
 	  	            	HAL_TIM_Base_Start_IT(&htim15);
 	  	              }
 	  	                  break;
@@ -400,6 +399,7 @@ int main(void)
 	  	                  // Handle fault condition
 	  	            	  // Turn off all gate drivers and stop FPGA
 	  	              {
+	  	            	HAL_GPIO_WritePin(RESET_FPGA_GPIO_Port, RESET_FPGA_GPIO_Port, 1); // RESET =  1  = reset turn on
 	  	            	HAL_GPIO_WritePin(START_STOP_FPGA_GPIO_Port, START_STOP_FPGA_Pin, 0);
 	  	            	HAL_GPIO_WritePin(NOT_RST_1_GPIO_Port,NOT_RST_1_Pin, GPIO_PIN_RESET);
 	  	            	HAL_GPIO_WritePin(NOT_RST_2_GPIO_Port,NOT_RST_2_Pin, GPIO_PIN_RESET);
@@ -1300,10 +1300,10 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(GPIOE, RESET_INTERLOCK_Pin|CS_OCD_1_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(START_STOP_FPGA_GPIO_Port, START_STOP_FPGA_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(RESET_FPGA_GPIO_Port, RESET_FPGA_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(NOT_RST_4_GPIO_Port, NOT_RST_4_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOC, START_STOP_FPGA_Pin|NOT_RST_4_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOB, NOT_RST_3_Pin|NOT_RST_2_Pin|NOT_RST_1_Pin|CS_OCD_2_Pin, GPIO_PIN_RESET);
@@ -1321,19 +1321,19 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(INTERLOCK_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : START_STOP_FPGA_Pin */
-  GPIO_InitStruct.Pin = START_STOP_FPGA_Pin;
+  /*Configure GPIO pin : RESET_FPGA_Pin */
+  GPIO_InitStruct.Pin = RESET_FPGA_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(START_STOP_FPGA_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(RESET_FPGA_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : NOT_RST_4_Pin */
-  GPIO_InitStruct.Pin = NOT_RST_4_Pin;
+  /*Configure GPIO pins : START_STOP_FPGA_Pin NOT_RST_4_Pin */
+  GPIO_InitStruct.Pin = START_STOP_FPGA_Pin|NOT_RST_4_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(NOT_RST_4_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
   /*Configure GPIO pins : READY_4_Pin READY_3_Pin READY_2_Pin READY_1_Pin
                            PD5 NOT_FAULT_3_Pin NOT_FAULT_2_Pin */
@@ -1506,6 +1506,8 @@ void Update_PWM_Frequency(TIM_HandleTypeDef *htim, uint32_t channel, uint32_t fr
 
 	    // Manually generate an update event by setting the UG bit in the EGR register
 	    htim->Instance->EGR = TIM_EGR_UG;
+
+
 	/*uint32_t timer_clock = 150000000;  // Adjust if TIM8 is using a different clock
     uint32_t prescaler = htim->Init.Prescaler + 1;
     uint32_t period = (timer_clock / (prescaler * frequency)) - 1;
@@ -1633,7 +1635,7 @@ uint8_t RAMP()
 					Vramp = Vref;
 					return 1; // Finished ramp
 				}
-
+				return 0;
 }
 
 void regulatorPI(float *out, float *integral, float in, float in_zad, float limp, float limn, float kp, float ti, float Ts1)
