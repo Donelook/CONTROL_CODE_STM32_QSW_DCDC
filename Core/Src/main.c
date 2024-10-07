@@ -22,9 +22,11 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "usb_device.h"
+
 #include "string.h"
 #include "math.h"
+#include <stdio.h>
+#include "usbd_cdc_if.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -145,8 +147,8 @@ float INPUT_VOLTAGE = 0; 		// 0.2V BIAS
 float PCB_TEMP = 0;				// Temperature of PCB
 float HEAT_SINK_TEMP = 0; 		// Temperature of heatsink
 void FAN_Drive();
-volatile static uint16_t ADC3_DMA_BUFFER[5];
-volatile static uint16_t ADC3_MEASURMENTS[5][MA_WINDOW_SIZE];
+volatile static uint32_t ADC3_DMA_BUFFER[5];
+volatile static uint32_t ADC3_MEASURMENTS[5][MA_WINDOW_SIZE];
 float ADC3_MOVING_AVERAGE[5][MA_WINDOW_SIZE];
 
 
@@ -157,13 +159,13 @@ float ADC3_MOVING_AVERAGE[5][MA_WINDOW_SIZE];
  * 3 - PCB temperature (MCP9700)
  * 4 - Heatsink Temprature (TMP236)
  */
-uint16_t Vref = 800; 			//  Reference voltage its compare to output voltage
+uint16_t Vref = 54; 			//  Reference voltage its compare to output voltage
 uint16_t step_size = 0.00125;
 float OUTPUT_VOLTAGE = 0; 	// Measured voltage 0.2V BIAS
 uint16_t Vout = 0; 				//Voltage comparing to Vref
 uint16_t Vramp = 0; 			// ramp voltage
-volatile static uint16_t ADC4_DMA_BUFFER;
-volatile static uint16_t ADC4_MEASURMENTS;
+volatile static uint32_t ADC4_DMA_BUFFER;
+volatile static uint32_t ADC4_MEASURMENTS;
 uint8_t RAMP();
 void regulatorPI(float *out, float *integral, float in, float in_zad, float limp, float limn, float kp, float ti, float Ts1);
 float delay_tr = 0; // DELAY/DEADTIME after first stage inductor  positive ramp
@@ -194,7 +196,7 @@ float Low_pass_filter(float new_sample, float old_sample);
  *
  */
 float IMAX2_SUM = 0;
-volatile static uint16_t ADC5_DMA_BUFFER[MA_WINDOW_SIZE];
+volatile static uint32_t ADC5_DMA_BUFFER[MA_WINDOW_SIZE];
 volatile static uint32_t ADC5_MEASURMENTS[MA_WINDOW_SIZE];
 float ADC5_MOVING_AVERAGE;
 
@@ -203,7 +205,6 @@ float ADC5_MOVING_AVERAGE;
 uint8_t USB_RX_Buffer[64];
 uint8_t USB_TX_Buffer[128];
 void SendUSBMessage(const char* message);
-void CDC_Receive_FS(uint8_t* Buf, uint32_t *Len);
 void ParseUSBCommand(void);
 void DisplayAllVariables(void);
 volatile uint8_t dataReceivedFlag = 0; // Flags to indicate new data received
@@ -219,7 +220,7 @@ float prev_delta = 0; 		// buffer  error n-1
 
 uint8_t START = 0;
 uint8_t CLEAR = 0;
-ConverterEvent event;
+ConverterEvent event = EVENT_SHUTDOWN;
 ConverterState currentState = STATE_INIT;
 
 /* USER CODE END 0 */
@@ -269,31 +270,7 @@ int main(void)
   MX_TIM16_Init();
   MX_TIM7_Init();
   /* USER CODE BEGIN 2 */
-  // Start PWM for delay time transfer to FPGA
-  /*HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1)!=  HAL_OK;
-  HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_2)!=  HAL_OK;*/
 
-  //DAC for  current reference
-  ///DAC1_OUT1 	- MAX1
-  //DAC1_OUT2 	- MAX2
-  //DAC2_OUT1	- MIN
-/*  HAL_DAC_Start(&hdac1,DAC1_CHANNEL_1);
-  HAL_DAC_Start(&hdac1,DAC1_CHANNEL_2);
-  HAL_DAC_Start(&hdac2,DAC2_CHANNEL_1);*/
-
-//if( HAL_DAC_Start_DMA(&hdac1, DAC_CHANNEL_1, dac_buffer, BUFFER_SIZE, DAC_ALIGN_12B_R)!= HAL_OK) printf("error");
-//HAL_DAC_SetValue(&hdac1, DAC_CHANNEL_1, DAC_ALIGN_12B_R, 2048);
-
-  // FAN PWM
- /* HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_1);
-
-
-  HAL_ADCEx_Calibration_Start(&hadc3, ADC_SINGLE_ENDED);
-  HAL_ADCEx_Calibration_Start(&hadc4, ADC_SINGLE_ENDED);
-  HAL_ADCEx_Calibration_Start(&hadc5, ADC_SINGLE_ENDED);
-  HAL_ADC_Start_DMA(&hadc3, (uint32_t*)ADC3_DMA_BUFFER, 5*MA_WINDOW_SIZE);
-  HAL_ADC_Start_DMA(&hadc4, (uint32_t*)ADC4_DMA_BUFFER, MA_WINDOW_SIZE);
-  HAL_ADC_Start_DMA(&hadc5, (uint32_t*)ADC5_DMA_BUFFER, MA_WINDOW_SIZE);*/
 
   /* USER CODE END 2 */
 
@@ -302,19 +279,21 @@ int main(void)
 	//event = EVENT_START;
   //USB_SendString("PRZED WHILEM\r\n");
 
-  // Example usage: Set frequency and duty cycle
-      //Update_PWM_Frequency(&htim1, TIM_CHANNEL_1, 10000000); // Set TIM1 CH1 to 500 kHz
-     // Update_PWM_Frequency(&htim8, TIM_CHANNEL_1, 5000000); // Set TIM8 CH1 to 710 kHz
 
-      // Set initial duty cycles (e.g., 50%)
-      //Update_PWM_DutyCycle(&htim1, TIM_CHANNEL_1, htim1.Init.Period / 2);
-     // Update_PWM_DutyCycle(&htim8, TIM_CHANNEL_2, htim8.Init.Period / 2);
   while (1)
   {
 
-	  	  	  	  ParseUSBCommand(); // Process incoming USB commands
 
-	  	          if (HAL_GPIO_ReadPin(INTERLOCK_GPIO_Port, INTERLOCK_Pin) == 1 && START && Check_Faults()   && Check_Ready()/* start condition */) {
+	  	  	  	  if (dataReceivedFlag) {
+	  	  	  	      // Process the data
+	  	  	  	      ParseUSBCommand();  // Function to handle the received command
+
+	  	  	  	      // Clear the flag after processing
+	  	  	  	      dataReceivedFlag = 0;
+	  	  	  	  }
+
+	  	  	  	  uint8_t interlock = HAL_GPIO_ReadPin(INTERLOCK_GPIO_Port, INTERLOCK_Pin);
+	  	          if (interlock == 1 && START && Check_Faults()   && Check_Ready()/* start condition */) {
 	  	        	//USB_SendString("State: EVENT START \r\n");
 	  	              event = EVENT_START;
 	  	          } else if (HAL_GPIO_ReadPin(INTERLOCK_GPIO_Port, INTERLOCK_Pin)/* fault condition */) {
@@ -368,14 +347,17 @@ int main(void)
 	  	            	HAL_ADC_Start_DMA(&hadc4, (uint32_t*)ADC4_DMA_BUFFER, 1);
 	  	            	HAL_ADC_Start_DMA(&hadc5, (uint32_t*)ADC5_DMA_BUFFER, 1);
 
-	  	            	Set_PWM_DutyCycle(20);
+	  	            //	Set_PWM_DutyCycle(20);
 	  	            	currentState = STATE_STANDBY;
 	  	              }
 	  	                  break;
 	  	              case STATE_STANDBY:
 	  	                  // Wait for start signal
 	  	              {
-	  	            	  if(START) currentState = STATE_SOFT_START;
+	  	            	  if(START){
+	  	            		  currentState = STATE_SOFT_START;
+	  	            	  }
+
 	  	              }
 	  	                  break;
 	  	              case STATE_SOFT_START:
@@ -389,7 +371,7 @@ int main(void)
 	  	                  break;
 	  	              case STATE_REGULATION:
 	  	                  // Maintain output voltage/current
-	  	            	  // 10khz sample time of regulators Timer 15
+	  	            	  // 20khz sample time of regulators Timer 15
 	  	                  {
 
 
@@ -399,7 +381,7 @@ int main(void)
 	  	                  // Handle fault condition
 	  	            	  // Turn off all gate drivers and stop FPGA
 	  	              {
-	  	            	HAL_GPIO_WritePin(RESET_FPGA_GPIO_Port, RESET_FPGA_GPIO_Port, 1); // RESET =  1  = reset turn on
+	  	            	HAL_GPIO_WritePin(RESET_FPGA_GPIO_Port, RESET_FPGA_Pin, 1); // RESET =  1  = reset turn on
 	  	            	HAL_GPIO_WritePin(START_STOP_FPGA_GPIO_Port, START_STOP_FPGA_Pin, 0);
 	  	            	HAL_GPIO_WritePin(NOT_RST_1_GPIO_Port,NOT_RST_1_Pin, GPIO_PIN_RESET);
 	  	            	HAL_GPIO_WritePin(NOT_RST_2_GPIO_Port,NOT_RST_2_Pin, GPIO_PIN_RESET);
@@ -1141,9 +1123,9 @@ static void MX_TIM15_Init(void)
 
   /* USER CODE END TIM15_Init 1 */
   htim15.Instance = TIM15;
-  htim15.Init.Prescaler = 2999;
+  htim15.Init.Prescaler = 1499;
   htim15.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim15.Init.Period = 1;
+  htim15.Init.Period = 4;
   htim15.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim15.Init.RepetitionCounter = 0;
   htim15.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
@@ -1441,7 +1423,7 @@ void Read_ADC3(void) {
 
 }
 
-void Set_PWM_DutyCycle(uint32_t dutyCycle) {
+void Set_PWM_DutyCycle(uint32_t dutyCycle) { // dutycyle for FAN SPEED CONTROl
     if (dutyCycle > 100) dutyCycle = 100;
     uint32_t pulse = (htim4.Init.Period + 1) * dutyCycle / 100 - 1;
         __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_1, pulse);
@@ -1463,6 +1445,8 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 		        // Restart the DMA transfer
 		        HAL_ADC_Start_DMA(hadc, (uint32_t*)ADC5_DMA_BUFFER, MA_WINDOW_SIZE);
 		    }
+
+
 }
 
 void calculateMovingAverage(uint16_t src[5][MA_WINDOW_SIZE], float dst[5][MA_WINDOW_SIZE])
@@ -1559,22 +1543,22 @@ uint8_t Check_Ready()
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
 {
 	// SOFT START RAMP REALISATION
-	//  Ts 10khz
+	//  Ts 20khz
 	if(htim->Instance == TIM15)
 	{
 		if(currentState == STATE_SOFT_START || currentState == STATE_REGULATION )
 		{
-		CURRENT_SENSOR1_VREF = (Low_pass_filter(ADC3_DMA_BUFFER[0], PCB_TEMP)/4096)*3.3;
-		CURRENT_SENSOR2_VREF = (Low_pass_filter(ADC3_DMA_BUFFER[1], PCB_TEMP)/4096)*3.3;
+		CURRENT_SENSOR1_VREF = (ADC3_DMA_BUFFER[0]/4096)*3.3;//(Low_pass_filter(ADC3_DMA_BUFFER[0], PCB_TEMP)/4096)*3.3;
+		CURRENT_SENSOR2_VREF = (ADC3_DMA_BUFFER[1]/4096)*3.3;//(Low_pass_filter(ADC3_DMA_BUFFER[1], PCB_TEMP)/4096)*3.3;
 
-		PCB_TEMP = (Low_pass_filter(ADC3_DMA_BUFFER[3], PCB_TEMP)/4096)*3.3;
-		HEAT_SINK_TEMP = (Low_pass_filter(ADC3_DMA_BUFFER[4], HEAT_SINK_TEMP)/4096)*3.3;
+		PCB_TEMP = (ADC3_DMA_BUFFER[3]/4096)*3.3;//(Low_pass_filter(ADC3_DMA_BUFFER[3], PCB_TEMP)/4096)*3.3;
+		HEAT_SINK_TEMP = (ADC3_DMA_BUFFER[4]/4096)*3.3;//(Low_pass_filter(ADC3_DMA_BUFFER[4], HEAT_SINK_TEMP)/4096)*3.3;
 
-		INPUT_VOLTAGE = (Low_pass_filter(ADC3_DMA_BUFFER[2], INPUT_VOLTAGE)/4096)*3.3;
-		OUTPUT_VOLTAGE = (Low_pass_filter(ADC4_DMA_BUFFER, OUTPUT_VOLTAGE)/4096)*3.3;
+		INPUT_VOLTAGE = (ADC3_DMA_BUFFER[2]/4096)*3.3;//((Low_pass_filter(ADC3_DMA_BUFFER[2], INPUT_VOLTAGE)/4096)*3.3-0.2)*27.1;
+		OUTPUT_VOLTAGE = (ADC4_DMA_BUFFER/4096)*3.3;//((Low_pass_filter(ADC4_DMA_BUFFER, OUTPUT_VOLTAGE)/4096)*3.3-0.2)*27.1;
 
-		IMAX2_SUM = ADC5_MOVING_AVERAGE*0.384; // 0.20V - -0.5A || 1.45v - 0A || 2.77V - 0.5A		0.384 A/V
-		float Gv = OUTPUT_VOLTAGE/INPUT_VOLTAGE;
+		IMAX2_SUM = (ADC5_MOVING_AVERAGE-1.45)*0.384; // 0.20V - -0.5A || 1.45v - 0A || 2.77V - 0.5A		0.384 A/V
+		float Gv = OUTPUT_VOLTAGE*(1/INPUT_VOLTAGE);
 
 		if(Gv<2) //CZARY
 		{
@@ -1585,9 +1569,8 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
 			delay_tr = (M_PI-acos(1/(Gv-1)))/wr;
 			IMIN = 0;
 		}
-		int delay_tr_freq = 1/delay_tr;
-
-		 Update_PWM_Frequency(&htim1, TIM_CHANNEL_1, delay_tr_freq); // Set TIM1 CH1 to freq that is delay tr and send to fpga
+		//int delay_tr_freq = 1/delay_tr;
+		//Update_PWM_Frequency(&htim1, TIM_CHANNEL_1, delay_tr_freq); // Set TIM1 CH1 to freq that is delay tr and send to fpga
 
 
 		FAN_Drive(); // Control Fan speed dpend on two temperatures pcb and radiator
@@ -1595,19 +1578,19 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
 		if(currentState == STATE_SOFT_START) RAMP(); // Adding to Vramp stepping voltage to create starting ramp
 
 		regulatorPI(&IMAX1, &Integral_I, OUTPUT_VOLTAGE, Vramp, LIM_PEAK_POS, LIM_PEAK_NEG, Kp, Ti, Ts);
-		delay_hc = (2*C_CAP*OUTPUT_VOLTAGE)/IMAX1;
+		//delay_hc = (2*C_CAP*OUTPUT_VOLTAGE)/IMAX1;
 
-		int delay_hc_freq = 1/delay_hc;
-		Update_PWM_Frequency(&htim8, TIM_CHANNEL_1, delay_hc_freq); // Set TIM8 CH1 o freq that is delay hc and send to fpga
+		//int delay_hc_freq = 1/delay_hc;
+		//Update_PWM_Frequency(&htim8, TIM_CHANNEL_1, delay_hc_freq); // Set TIM8 CH1 o freq that is delay hc and send to fpga
 
 		IMAX2 = IMAX1 + IMAX2_SUM; // IMAX2_SUM signal from FPGA
 		// IMAX1,2 each for branches to make 180 degree shift
 		HAL_DAC_SetValue(&hdac1, DAC_CHANNEL_1, DAC_ALIGN_12B_R, 2048+((int)IMAX1*25)); // IMAX1  1.5V is 0A;  1A is 20mV; 1 bit is 0.8mV; x A * 0.02V / 0.0008V = Value for DAC
 		HAL_DAC_SetValue(&hdac1, DAC_CHANNEL_2, DAC_ALIGN_12B_R, 2048+((int)IMAX2*25)); // IMAX2
-		HAL_DAC_SetValue(&hdac2, DAC_CHANNEL_1, DAC_ALIGN_12B_R, 2048+((int)IMIN*25)); // IMIN
+		HAL_DAC_SetValue(&hdac2, DAC_CHANNEL_1, DAC_ALIGN_12B_R, 2048+((int)IMIN*25)); // IMIN*/
 
 		}
-
+		//HAL_TIM_Base_Stop_IT(&htim15);
 	}
 
 	if (htim->Instance == TIM7)
@@ -1730,17 +1713,25 @@ void FAN_Drive()
 }
 
 
-void CDC_Receive_FS(uint8_t* Buf, uint32_t *Len) {
-    memcpy(USB_RX_Buffer, Buf, *Len);
-    dataReceivedFlag = 1;
-}
 
 void SendUSBMessage(const char* message) {
     uint16_t len = strlen(message);
     if (len > 127) len = 127;  // Limit to buffer size
     memcpy(USB_TX_Buffer, message, len);
     USB_TX_Buffer[len] = '\0';  // Ensure null-terminated string
-    CDC_Transmit_FS(USB_TX_Buffer, len);
+    uint8_t result;
+    /*do {
+        result = CDC_Transmit_FS(USB_TX_Buffer, len);
+        if (result == USBD_OK) {
+            break;
+        }
+      // HAL_Delay(10);  // Small delay before retrying
+    } while (retry_count-- > 0);*/
+    do {
+            result = CDC_Transmit_FS((uint8_t*)message, len);
+        } while (result == USBD_BUSY); // Retry while USB is busy
+
+
 }
 
 void ParseUSBCommand(void) {
@@ -1815,6 +1806,7 @@ void ParseUSBCommand(void) {
 	        } else {
 	            SendUSBMessage("Unknown Command\n");
 	        }
+	        memset(USB_RX_Buffer, 0, sizeof(USB_RX_Buffer));  // Clear buffer
 	        dataReceivedFlag = 0;
 	    }
 }
