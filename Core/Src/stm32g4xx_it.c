@@ -22,6 +22,7 @@
 #include "stm32g4xx_it.h"
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -61,7 +62,9 @@ extern DMA_HandleTypeDef hdma_adc4;
 extern DMA_HandleTypeDef hdma_adc5;
 extern DMA_HandleTypeDef hdma_dac1_ch1;
 extern DMA_HandleTypeDef hdma_dac2_ch1;
+extern DAC_HandleTypeDef hdac1;
 extern TIM_HandleTypeDef htim1;
+extern TIM_HandleTypeDef htim6;
 extern TIM_HandleTypeDef htim15;
 /* USER CODE BEGIN EV */
 
@@ -302,6 +305,27 @@ void TIM1_BRK_TIM15_IRQHandler(void)
   /* USER CODE BEGIN TIM1_BRK_TIM15_IRQn 1 */
 
   /* USER CODE END TIM1_BRK_TIM15_IRQn 1 */
+}
+
+/**
+  * @brief This function handles TIM6 global interrupt, DAC1 and DAC3 channel underrun error interrupts.
+  */
+void TIM6_DAC_IRQHandler(void)
+{
+  /* USER CODE BEGIN TIM6_DAC_IRQn 0 */
+	/*if(currentState == STATE_SOFT_START || currentState == STATE_REGULATION )
+					{
+					PCB_TEMP = (ADC3_DMA_BUFFER[3]/4096)*3.3;//(Low_pass_filter(ADC3_DMA_BUFFER[3], PCB_TEMP)/4096)*3.3;
+					HEAT_SINK_TEMP = (ADC3_DMA_BUFFER[4]/4096)*3.3;//(Low_pass_filter(ADC3_DMA_BUFFER[4], HEAT_SINK_TEMP)/4096)*3.3;
+					FAN_Drive(); // Control Fan speed dpend on two temperatures pcb and radiator
+					}*/
+
+  /* USER CODE END TIM6_DAC_IRQn 0 */
+  HAL_TIM_IRQHandler(&htim6);
+  HAL_DAC_IRQHandler(&hdac1);
+  /* USER CODE BEGIN TIM6_DAC_IRQn 1 */
+
+  /* USER CODE END TIM6_DAC_IRQn 1 */
 }
 
 /* USER CODE BEGIN 1 */

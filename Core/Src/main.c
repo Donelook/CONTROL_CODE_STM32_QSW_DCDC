@@ -54,11 +54,11 @@ typedef enum {
 #define MA_WINDOW_SIZE 10  		// Moving average window
 #define BUFFER_SIZE 100  		// Buffer size for DAC test - not used in final program
 #define res12_b 4096
-#define L_IND 0.000094 			// 94uH
+#define L_IND 0.0000000022  	// 94uH
 #define C_CAP 0.0000000022 		// 2.2nF
-#define wr sqrt(L_IND*C_CAP)		// Omega of LC resonance
-#define Z sqrt(L_IND/(2*C_CAP)) // impedance of inductor and two capacitor on Dren-Source MOSFETs
-#define Ts 0.00005			// Sampling rate of control loop 20khz
+#define wr 69536414				//	1/sqrt(L_IND*C_CAP)	- Omega of LC resonance
+#define Z 146.128				//sqrt(L_IND/(2*C_CAP)) // impedance of inductor and two capacitor on Dren-Source MOSFETs
+#define Ts 0.00005				// Sampling rate of control loop 20khz
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -82,6 +82,7 @@ DMA_HandleTypeDef hdma_dac2_ch1;
 
 TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim4;
+TIM_HandleTypeDef htim6;
 TIM_HandleTypeDef htim7;
 TIM_HandleTypeDef htim8;
 TIM_HandleTypeDef htim15;
@@ -110,6 +111,7 @@ static void MX_TIM4_Init(void);
 static void MX_TIM15_Init(void);
 static void MX_TIM16_Init(void);
 static void MX_TIM7_Init(void);
+static void MX_TIM6_Init(void);
 /* USER CODE BEGIN PFP */
 
 // Simple moving average filter
@@ -138,36 +140,36 @@ uint8_t Check_Ready();
 /* USER CODE BEGIN 0 */
 uint16_t dac_buffer[BUFFER_SIZE];
 void Read_ADC3(void);
-float CURRENT_SENSOR1_VREF = 0; // 1.5V - 0 A
-float CURRENT_SENSOR2_VREF = 0; // 1.5V - 0 A
-float IMAX1 = 0;
-float IMAX2 = 0;
-float IMIN = 0;
-float INPUT_VOLTAGE = 0; 		// 0.2V BIAS
-float PCB_TEMP = 0;				// Temperature of PCB
-float HEAT_SINK_TEMP = 0; 		// Temperature of heatsink
+uint32_t current_sensor1_vref = 0; // 1.5V - 0 A
+uint32_t current_sensor2_vref = 0; // 1.5V - 0 A
+uint32_t imax1 = 0;
+uint32_t imax2 = 0;
+uint32_t imin = 0;
+uint32_t input_voltage = 0; 		// 0.2V BIAS
+uint32_t pcb_temp = 0;				// Temperature of PCB
+uint32_t heat_sink_temp = 0; 		// Temperature of heatsink
 void FAN_Drive();
-volatile static uint32_t ADC3_DMA_BUFFER[5];
-volatile static uint32_t ADC3_MEASURMENTS[5][MA_WINDOW_SIZE];
-float ADC3_MOVING_AVERAGE[5][MA_WINDOW_SIZE];
+volatile static uint16_t adc3_dma_buffer[5];
+volatile static uint16_t adc3_measurments[5][MA_WINDOW_SIZE];
+uint16_t adc3_moving_average[5][MA_WINDOW_SIZE];
 
 
-/* ADC3_MEASURMENTS[x]
- * 0 - Current Sensor 1 Vref(1.5V Nominal)
- * 1 - Current Sensor 2 Vref(1.5V Nominal)
+/* adc3_measurments[x]
+ * 0 - Current Sensor 1 vref(1.5V Nominal)
+ * 1 - Current Sensor 2 vref(1.5V Nominal)
  * 2 - Input Voltage(0V2 bias)
  * 3 - PCB temperature (MCP9700)
  * 4 - Heatsink Temprature (TMP236)
  */
-uint16_t Vref = 54; 			//  Reference voltage its compare to output voltage
+uint16_t vref = 48; 			//  Reference voltage its compare to output voltage
 uint16_t step_size = 0.00125;
-float OUTPUT_VOLTAGE = 0; 	// Measured voltage 0.2V BIAS
-uint16_t Vout = 0; 				//Voltage comparing to Vref
+uint32_t output_voltage = 0; 	// Measured voltage 0.2V BIAS
+uint16_t vout = 0; 				//Voltage comparing to vref
 uint16_t Vramp = 0; 			// ramp voltage
-volatile static uint32_t ADC4_DMA_BUFFER;
-volatile static uint32_t ADC4_MEASURMENTS;
+volatile static uint16_t adc4_dma_buffer;
+volatile static uint16_t adc4_measurments;
 uint8_t RAMP();
-void regulatorPI(float *out, float *integral, float in, float in_zad, float limp, float limn, float kp, float ti, float Ts1);
+void regulatorPI(uint32_t *out, uint32_t *integral, float in, float in_zad, float limp, float limn, float kp, float ti, float Ts1);
 float delay_tr = 0; // DELAY/DEADTIME after first stage inductor  positive ramp
 float delay_hc = 0; // DELAY/DEADTIME after second stage inductor negative ramp
 
@@ -192,13 +194,13 @@ float Low_pass_filter(float new_sample, float old_sample);
 
 
 /* ADC5_MEASRUMENTS[X]
- * 0 - IMAX2_SUM
+ * 0 - imax2_sum
  *
  */
-float IMAX2_SUM = 0;
-volatile static uint32_t ADC5_DMA_BUFFER[MA_WINDOW_SIZE];
-volatile static uint32_t ADC5_MEASURMENTS[MA_WINDOW_SIZE];
-float ADC5_MOVING_AVERAGE;
+uint32_t imax2_sum = 0;
+volatile static uint16_t adc5_dma_buffer[MA_WINDOW_SIZE];
+volatile static uint16_t adc5_measurments[MA_WINDOW_SIZE];
+uint16_t adc_moving_average;
 
 // USB INTERFACE DISPLAY AND SET
 // Buffer to hold incoming data
@@ -215,11 +217,11 @@ float Kp = 0.15; 			// Proportional part of PI
 float Ti = 0.005; 			// Integral part of PI
 float LIM_PEAK_POS = 40; 	// Positive limit for PI regulator
 float LIM_PEAK_NEG = -4; 	// Negative limit for PI regulator
-float Integral_I = 0;		// Integral part of PI
+uint32_t Integral_I = 0;		// Integral part of PI
 float prev_delta = 0; 		// buffer  error n-1
 
-uint8_t START = 0;
-uint8_t CLEAR = 0;
+uint8_t start_program = 0;
+uint8_t clear_fault = 0;
 ConverterEvent event = EVENT_SHUTDOWN;
 ConverterState currentState = STATE_INIT;
 
@@ -269,6 +271,7 @@ int main(void)
   MX_TIM15_Init();
   MX_TIM16_Init();
   MX_TIM7_Init();
+  MX_TIM6_Init();
   /* USER CODE BEGIN 2 */
 
 
@@ -293,12 +296,12 @@ int main(void)
 	  	  	  	  }
 
 	  	  	  	  uint8_t interlock = HAL_GPIO_ReadPin(INTERLOCK_GPIO_Port, INTERLOCK_Pin);
-	  	          if (interlock == 1 && START && Check_Faults()   && Check_Ready()/* start condition */) {
-	  	        	//USB_SendString("State: EVENT START \r\n");
+	  	          if (interlock == 1 && start_program && Check_Faults()   && Check_Ready()/* start_program condition */) {
+	  	        	//USB_SendString("State: EVENT start_program \r\n");
 	  	              event = EVENT_START;
 	  	          } else if (HAL_GPIO_ReadPin(INTERLOCK_GPIO_Port, INTERLOCK_Pin)/* fault condition */) {
 	  	              event = EVENT_FAULT;
-	  	          } else if (CLEAR) {
+	  	          } else if (clear_fault) {
 	  	        	  /* clear fault condition */
 	  	              event = EVENT_CLEAR_FAULT;
 	  	          } else if (0/* shutdown condition */) {
@@ -325,6 +328,7 @@ int main(void)
 
 	  	            	// Timer for clear fault  event to reset current sensor by pull down OCD pins
 	  	            	HAL_TIM_PWM_Start(&htim16, TIM_CHANNEL_1);
+
 	  	            	  //DAC for  current reference
 	  	            	  ///DAC1_OUT1 	- MAX1
 	  	            	  //DAC1_OUT2 	- MAX2
@@ -336,25 +340,25 @@ int main(void)
 	  	            	//if( HAL_DAC_Start_DMA(&hdac1, DAC_CHANNEL_1, dac_buffer, BUFFER_SIZE, DAC_ALIGN_12B_R)!= HAL_OK) printf("error");
 	  	            	//HAL_DAC_SetValue(&hdac1, DAC_CHANNEL_1, DAC_ALIGN_12B_R, 2048);
 
-	  	            	  // FAN PWM
+	  	            	  // FAN PWM and 5s timer6 for check temperature and change duty cycle
 	  	            	HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_1);
-
+	  	            	HAL_TIM_Base_Start_IT(&htim6);
 
 	  	            	HAL_ADCEx_Calibration_Start(&hadc3, ADC_SINGLE_ENDED);
 	  	            	HAL_ADCEx_Calibration_Start(&hadc4, ADC_SINGLE_ENDED);
 	  	            	HAL_ADCEx_Calibration_Start(&hadc5, ADC_SINGLE_ENDED);
-	  	            	HAL_ADC_Start_DMA(&hadc3, (uint32_t*)ADC3_DMA_BUFFER, 5);
-	  	            	HAL_ADC_Start_DMA(&hadc4, (uint32_t*)ADC4_DMA_BUFFER, 1);
-	  	            	HAL_ADC_Start_DMA(&hadc5, (uint32_t*)ADC5_DMA_BUFFER, 1);
+	  	            	HAL_ADC_Start_DMA(&hadc3, (uint32_t*)adc3_dma_buffer, 5);
+	  	            	HAL_ADC_Start_DMA(&hadc4, (uint32_t*)adc4_dma_buffer, 1);
+	  	            	HAL_ADC_Start_DMA(&hadc5, (uint32_t*)adc5_dma_buffer, 1);
 
-	  	            //	Set_PWM_DutyCycle(20);
+	  	            	//Set_PWM_DutyCycle(50);
 	  	            	currentState = STATE_STANDBY;
 	  	              }
 	  	                  break;
 	  	              case STATE_STANDBY:
-	  	                  // Wait for start signal
+	  	                  // Wait for start_program signal
 	  	              {
-	  	            	  if(START){
+	  	            	  if(start_program){
 	  	            		  currentState = STATE_SOFT_START;
 	  	            	  }
 
@@ -363,9 +367,11 @@ int main(void)
 	  	              case STATE_SOFT_START:
 	  	                  // Gradually ramp up the output
 	  	              {
-	  	            	  //Start timer that start ramp and pi regulation
-	  	            //	HAL_GPIO_WritePin(RESET_FPGA_GPIO_Port, RESET_FPGA_GPIO_Port, 0); // RESET =  1  = reset turn on
-	  	            //	HAL_GPIO_WritePin(START_STOP_FPGA_GPIO_Port, START_STOP_FPGA_Pin, 1);
+	  	            	current_sensor1_vref = adc3_dma_buffer[0]*3300/4096;//(Low_pass_filter(adc3_dma_buffer[0], pcb_temp)/4096)*3.3;
+	  	            	current_sensor2_vref = adc3_dma_buffer[1]*3300/4096;//(Low_pass_filter(adc3_dma_buffer[1], pcb_temp)/4096)*3.3;
+	  	            	  //Start timer that start_program ramp and pi regulation
+	  	            	//	HAL_GPIO_WritePin(RESET_FPGA_GPIO_Port, RESET_FPGA_GPIO_Port, 0); // RESET =  1  = reset turn on
+	  	            	//	HAL_GPIO_WritePin(START_STOP_FPGA_GPIO_Port, START_STOP_FPGA_Pin, 1);
 	  	            	HAL_TIM_Base_Start_IT(&htim15);
 	  	              }
 	  	                  break;
@@ -394,7 +400,7 @@ int main(void)
 
 
 	  	            	HAL_TIM_Base_Stop_IT(&htim15);
-	  	            	START = 0;
+	  	            	start_program = 0;
 	  	              }
 	  	                  break;
 	  	              case STATE_SHUTDOWN:
@@ -995,6 +1001,45 @@ static void MX_TIM4_Init(void)
 }
 
 /**
+  * @brief TIM6 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM6_Init(void)
+{
+
+  /* USER CODE BEGIN TIM6_Init 0 */
+
+  /* USER CODE END TIM6_Init 0 */
+
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM6_Init 1 */
+
+  /* USER CODE END TIM6_Init 1 */
+  htim6.Instance = TIM6;
+  htim6.Init.Prescaler = 11549;
+  htim6.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim6.Init.Period = 64934;
+  htim6.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim6) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim6, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM6_Init 2 */
+  HAL_NVIC_SetPriority(TIM6_DAC_IRQn, 0, 0);
+      HAL_NVIC_EnableIRQ(TIM6_DAC_IRQn);
+  /* USER CODE END TIM6_Init 2 */
+
+}
+
+/**
   * @brief TIM7 Initialization Function
   * @param None
   * @retval None
@@ -1436,14 +1481,14 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 		        uint32_t sum = 0;
 		        for (int i = 0; i < MA_WINDOW_SIZE; i++)
 		        {
-		            sum += ADC5_DMA_BUFFER[i];
+		            sum += adc5_dma_buffer[i];
 		        }
-		        ADC5_MOVING_AVERAGE = (((float)sum / MA_WINDOW_SIZE)/4096)*3.3;
+		        adc_moving_average = ((sum / MA_WINDOW_SIZE)*3300)/4096;
 
 		       // adc5_data_ready = 1; // Set flag to indicate new data is ready
 
 		        // Restart the DMA transfer
-		        HAL_ADC_Start_DMA(hadc, (uint32_t*)ADC5_DMA_BUFFER, MA_WINDOW_SIZE);
+		        HAL_ADC_Start_DMA(hadc, (uint32_t*)adc5_dma_buffer, MA_WINDOW_SIZE);
 		    }
 
 
@@ -1455,10 +1500,10 @@ void calculateMovingAverage(uint16_t src[5][MA_WINDOW_SIZE], float dst[5][MA_WIN
     {
         for (int i = 0; i < MA_WINDOW_SIZE; i++)
         {
-            int start = (i - MA_WINDOW_SIZE + 1) >= 0 ? (i - MA_WINDOW_SIZE + 1) : 0;
-            int count = i - start + 1;
+            int start_program = (i - MA_WINDOW_SIZE + 1) >= 0 ? (i - MA_WINDOW_SIZE + 1) : 0;
+            int count = i - start_program + 1;
             uint32_t sum = 0;
-            for (int j = start; j <= i; j++)
+            for (int j = start_program; j <= i; j++)
             {
                 sum += src[ch][j];
             }
@@ -1542,56 +1587,63 @@ uint8_t Check_Ready()
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
 {
-	// SOFT START RAMP REALISATION
+	// SOFT start_program RAMP REALISATION
 	//  Ts 20khz
 	if(htim->Instance == TIM15)
 	{
 		if(currentState == STATE_SOFT_START || currentState == STATE_REGULATION )
 		{
-		CURRENT_SENSOR1_VREF = (ADC3_DMA_BUFFER[0]/4096)*3.3;//(Low_pass_filter(ADC3_DMA_BUFFER[0], PCB_TEMP)/4096)*3.3;
-		CURRENT_SENSOR2_VREF = (ADC3_DMA_BUFFER[1]/4096)*3.3;//(Low_pass_filter(ADC3_DMA_BUFFER[1], PCB_TEMP)/4096)*3.3;
+		//current_sensor1_vref = adc3_dma_buffer[0]*3300/4096;//(Low_pass_filter(adc3_dma_buffer[0], pcb_temp)/4096)*3.3;
+		//current_sensor2_vref = adc3_dma_buffer[1]*3300/4096;//(Low_pass_filter(adc3_dma_buffer[1], pcb_temp)/4096)*3.3;
 
-		PCB_TEMP = (ADC3_DMA_BUFFER[3]/4096)*3.3;//(Low_pass_filter(ADC3_DMA_BUFFER[3], PCB_TEMP)/4096)*3.3;
-		HEAT_SINK_TEMP = (ADC3_DMA_BUFFER[4]/4096)*3.3;//(Low_pass_filter(ADC3_DMA_BUFFER[4], HEAT_SINK_TEMP)/4096)*3.3;
+		input_voltage = (adc3_dma_buffer[2]*3300)/4096;//((Low_pass_filter(adc3_dma_buffer[2], input_voltage)/4096)*3.3-0.2)*27.1;
+		output_voltage = 1;//adc4_dma_buffer*3300/4096;//((Low_pass_filter(adc4_dma_buffer, output_voltage)/4096)*3.3-0.2)*27.1;
 
-		INPUT_VOLTAGE = (ADC3_DMA_BUFFER[2]/4096)*3.3;//((Low_pass_filter(ADC3_DMA_BUFFER[2], INPUT_VOLTAGE)/4096)*3.3-0.2)*27.1;
-		OUTPUT_VOLTAGE = (ADC4_DMA_BUFFER/4096)*3.3;//((Low_pass_filter(ADC4_DMA_BUFFER, OUTPUT_VOLTAGE)/4096)*3.3-0.2)*27.1;
-
-		IMAX2_SUM = (ADC5_MOVING_AVERAGE-1.45)*0.384; // 0.20V - -0.5A || 1.45v - 0A || 2.77V - 0.5A		0.384 A/V
-		float Gv = OUTPUT_VOLTAGE*(1/INPUT_VOLTAGE);
+		imax2_sum = (adc_moving_average-1.45)*0.384; // 0.20V - -0.5A || 1.45v - 0A || 2.77V - 0.5A		0.384 A/V
+		float Gv = 1;//output_voltage/input_voltage;
 
 		if(Gv<2) //CZARY
 		{
 			delay_tr = acos(1-Gv)/wr;
-			IMIN = OUTPUT_VOLTAGE*sqrt((2-Gv)/Gv)/Z; // Negative current needed to Zero voltage switching in resonance
+			imin = output_voltage*sqrt((2-Gv)/Gv)/Z; // Negative current needed to Zero voltage switching in resonance
 		} else if(Gv>=2)
 		{
 			delay_tr = (M_PI-acos(1/(Gv-1)))/wr;
-			IMIN = 0;
+			imin = 0;
 		}
-		//int delay_tr_freq = 1/delay_tr;
-		//Update_PWM_Frequency(&htim1, TIM_CHANNEL_1, delay_tr_freq); // Set TIM1 CH1 to freq that is delay tr and send to fpga
-
-
-		FAN_Drive(); // Control Fan speed dpend on two temperatures pcb and radiator
+		if(delay_tr<0.01){
+		int delay_tr_freq = (int)(1/delay_tr);
+		Update_PWM_Frequency(&htim1, TIM_CHANNEL_1, delay_tr_freq); // Set TIM1 CH1 to freq that is delay tr and send to fpga
+		}
 
 		if(currentState == STATE_SOFT_START) RAMP(); // Adding to Vramp stepping voltage to create starting ramp
 
-		regulatorPI(&IMAX1, &Integral_I, OUTPUT_VOLTAGE, Vramp, LIM_PEAK_POS, LIM_PEAK_NEG, Kp, Ti, Ts);
-		//delay_hc = (2*C_CAP*OUTPUT_VOLTAGE)/IMAX1;
+		regulatorPI(&imax1, &Integral_I, output_voltage, Vramp, LIM_PEAK_POS, LIM_PEAK_NEG, Kp, Ti, Ts);
 
-		//int delay_hc_freq = 1/delay_hc;
-		//Update_PWM_Frequency(&htim8, TIM_CHANNEL_1, delay_hc_freq); // Set TIM8 CH1 o freq that is delay hc and send to fpga
+		if(output_voltage>1){
+		delay_hc = (2*C_CAP*output_voltage)/imax1;
+		int delay_hc_freq = 1/delay_hc;
+		Update_PWM_Frequency(&htim8, TIM_CHANNEL_1, delay_hc_freq); // Set TIM8 CH1 o freq that is delay hc and send to fpga
+		}
 
-		IMAX2 = IMAX1 + IMAX2_SUM; // IMAX2_SUM signal from FPGA
-		// IMAX1,2 each for branches to make 180 degree shift
-		HAL_DAC_SetValue(&hdac1, DAC_CHANNEL_1, DAC_ALIGN_12B_R, 2048+((int)IMAX1*25)); // IMAX1  1.5V is 0A;  1A is 20mV; 1 bit is 0.8mV; x A * 0.02V / 0.0008V = Value for DAC
-		HAL_DAC_SetValue(&hdac1, DAC_CHANNEL_2, DAC_ALIGN_12B_R, 2048+((int)IMAX2*25)); // IMAX2
-		HAL_DAC_SetValue(&hdac2, DAC_CHANNEL_1, DAC_ALIGN_12B_R, 2048+((int)IMIN*25)); // IMIN*/
+		imax2 = imax1 + imax2_sum; // imax2_sum signal from FPGA
+		// imax1,2 each for branches to make 180 degree shift
+		HAL_DAC_SetValue(&hdac1, DAC_CHANNEL_1, DAC_ALIGN_12B_R, 2048+((int)imax1*25)); // imax1  1.5V is 0A;  1A is 20mV; 1 bit is 0.8mV; x A * 0.02V / 0.0008V = Value for DAC
+		HAL_DAC_SetValue(&hdac1, DAC_CHANNEL_2, DAC_ALIGN_12B_R, 2048+((int)imax2*25)); // imax2
+		HAL_DAC_SetValue(&hdac2, DAC_CHANNEL_1, DAC_ALIGN_12B_R, 2048+((int)imin*25)); // imin*/
 
 		}
 		//HAL_TIM_Base_Stop_IT(&htim15);
 	}
+
+	if (htim->Instance == TIM6) // 5 sec period
+		    {
+		//if(currentState == STATE_SOFT_START || currentState == STATE_REGULATION )
+				//{
+				FAN_Drive(); // Control Fan speed dpend on two temperatures pcb and radiator
+				//}
+		    }
+
 
 	if (htim->Instance == TIM7)
 	    {
@@ -1603,25 +1655,27 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
 	        // Stop the timer
 	        HAL_TIM_Base_Stop_IT(&htim7);
 	    }
+
+
 }
 
 uint8_t RAMP()
 {
 	// RAMP Voltage to soft-start
-				if((Vout-Vref)<1)
+				if((vout-vref)<1)
 				{
-					Vramp = Vout+Vref*step_size; // 1s ramp 0 to 800V
+					Vramp = vout+vref*step_size; // 1s ramp 0 to 800V
 					return 0; // not finished ramp
 				}
-				else if((Vout-Vref)>1)
+				else if((vout-vref)>1)
 				{
-					Vramp = Vref;
+					Vramp = vref;
 					return 1; // Finished ramp
 				}
 				return 0;
 }
 
-void regulatorPI(float *out, float *integral, float in, float in_zad, float limp, float limn, float kp, float ti, float Ts1)
+void regulatorPI(uint32_t *out, uint32_t *integral, float in, float in_zad, float limp, float limn, float kp, float ti, float Ts1)
 {
 	// Tustin transfrom of PI regulator s -> 2/T * (Z-1)/(Z+1)
     float delta;
@@ -1637,7 +1691,7 @@ void regulatorPI(float *out, float *integral, float in, float in_zad, float limp
     {
         *integral = limn;
     }
-    *out = (delta * kp + *integral); // Sum of P and I
+    *out = (delta * kp + *integral)/1000; // Sum of P and I
     if (*out >= limp) // limit peak positive
     {
         *out = limp;
@@ -1684,22 +1738,24 @@ float Low_pass_filter(float new_sample, float old_sample)
 
 }
 void FAN_Drive()
-{
-	int duty_cycle = 20;
-		float temperature = 20;
-		PCB_TEMP = (PCB_TEMP-0.4)/0.0195;
-		HEAT_SINK_TEMP = (HEAT_SINK_TEMP-0.5)/0.01;
+{ //@ToDo poprawic ogarnac zeby a intach bylo
+		pcb_temp = (adc3_dma_buffer[3]*3300)/4096;//(Low_pass_filter(adc3_dma_buffer[3], pcb_temp)/4096)*3.3;
+		heat_sink_temp = (adc3_dma_buffer[4]*3300)/4096;//(Low_pass_filter(adc3_dma_buffer[4], heat_sink_temp)/4096)*3.3;
 
+		int duty_cycle = 20;
+		uint32_t temperature = 20;
+
+		pcb_temp = (pcb_temp-400)/20;
+		heat_sink_temp = (heat_sink_temp-500)/10;
 		// Choose the higher of the two temperatures
-		temperature = (PCB_TEMP > HEAT_SINK_TEMP) ? PCB_TEMP : HEAT_SINK_TEMP;
-
+		temperature = (pcb_temp > heat_sink_temp) ? pcb_temp : heat_sink_temp;
 		// Apply a non-linear (exponential) scaling for the fan speed
 		// This scales the temperature to a value between 0 and 1, then applies an exponential curve
-		float normalized_temp = (temperature - 20) / 80;  // Normalizing between 0 (20°C) and 1 (100°C)
-		if (normalized_temp > 1.0) normalized_temp = 1.0;
-		if (normalized_temp < 0.0) normalized_temp = 0.0;
+		uint32_t normalized_temp = ((temperature - 20) *100)/ 80;  // Normalizing between 0 (20°C) and 1000 (100°C)
+		if (normalized_temp > 100) normalized_temp = 100;
+		if (normalized_temp < 0) normalized_temp = 0;
 
-		duty_cycle = 20 + (int)(pow(normalized_temp, 3) * 79);  // Cubic curve for fan speed control
+		duty_cycle = 20 + ((int)(pow(normalized_temp, 3) * 79))/1000000;  // Cubic curve for fan speed control
 
 		// Enforce minimum and maximum duty cycles
 		if (temperature < 20) {
@@ -1745,20 +1801,20 @@ void ParseUSBCommand(void) {
 	            SendUSBMessage("Ti Updated\n");
 
 	        } else if (strncmp((char*)USB_RX_Buffer, "SET_VREF", 8) == 0) {
-	            sscanf((char*)USB_RX_Buffer, "SET_VREF %hu", &Vref);
-	            SendUSBMessage("Vref Updated\n");
+	            sscanf((char*)USB_RX_Buffer, "SET_VREF %hu", &vref);
+	            SendUSBMessage("vref Updated\n");
 
 	        } else if (strncmp((char*)USB_RX_Buffer, "SET_CS1_VREF", 12) == 0) {
-	            sscanf((char*)USB_RX_Buffer, "SET_CS1_VREF %f", &CURRENT_SENSOR1_VREF);
-	            SendUSBMessage("CURRENT_SENSOR1_VREF Updated\n");
+	            sscanf((char*)USB_RX_Buffer, "SET_CS1_VREF %d", &current_sensor1_vref);
+	            SendUSBMessage("current_sensor1_vref Updated\n");
 
 	        } else if (strncmp((char*)USB_RX_Buffer, "SET_CS2_VREF", 12) == 0) {
-	            sscanf((char*)USB_RX_Buffer, "SET_CS2_VREF %f", &CURRENT_SENSOR2_VREF);
-	            SendUSBMessage("CURRENT_SENSOR2_VREF Updated\n");
+	            sscanf((char*)USB_RX_Buffer, "SET_CS2_VREF %d", &current_sensor2_vref);
+	            SendUSBMessage("current_sensor2_vref Updated\n");
 
 	        } else if (strncmp((char*)USB_RX_Buffer, "SET_IMAX2_SUM", 13) == 0) {
-	            sscanf((char*)USB_RX_Buffer, "SET_IMAX2_SUM %f", &IMAX2_SUM);
-	            SendUSBMessage("IMAX2_SUM Updated\n");
+	            sscanf((char*)USB_RX_Buffer, "SET_IMAX2_SUM %d", &imax2_sum);
+	            SendUSBMessage("imax2_sum Updated\n");
 
 	        } else if (strncmp((char*)USB_RX_Buffer, "SET_DELAY_TR", 12) == 0) {
 	            sscanf((char*)USB_RX_Buffer, "SET_DELAY_TR %f", &delay_tr);
@@ -1777,19 +1833,19 @@ void ParseUSBCommand(void) {
 	            SendUSBMessage((char*)USB_TX_Buffer);
 
 	        } else if (strncmp((char*)USB_RX_Buffer, "GET_VREF", 8) == 0) {
-	            sprintf((char*)USB_TX_Buffer, "Vref = %hu\n", Vref);
+	            sprintf((char*)USB_TX_Buffer, "vref = %hu\n", vref);
 	            SendUSBMessage((char*)USB_TX_Buffer);
 
 	        } else if (strncmp((char*)USB_RX_Buffer, "GET_CS1_VREF", 12) == 0) {
-	            sprintf((char*)USB_TX_Buffer, "CURRENT_SENSOR1_VREF = %f\n", CURRENT_SENSOR1_VREF);
+	            sprintf((char*)USB_TX_Buffer, "current_sensor1_vref = %f\n", current_sensor1_vref);
 	            SendUSBMessage((char*)USB_TX_Buffer);
 
 	        } else if (strncmp((char*)USB_RX_Buffer, "GET_CS2_VREF", 12) == 0) {
-	            sprintf((char*)USB_TX_Buffer, "CURRENT_SENSOR2_VREF = %f\n", CURRENT_SENSOR2_VREF);
+	            sprintf((char*)USB_TX_Buffer, "current_sensor2_vref = %f\n", current_sensor2_vref);
 	            SendUSBMessage((char*)USB_TX_Buffer);
 
 	        } else if (strncmp((char*)USB_RX_Buffer, "GET_IMAX2_SUM", 13) == 0) {
-	            sprintf((char*)USB_TX_Buffer, "IMAX2_SUM = %f\n", IMAX2_SUM);
+	            sprintf((char*)USB_TX_Buffer, "imax2_sum = %f\n", imax2_sum);
 	            SendUSBMessage((char*)USB_TX_Buffer);
 
 	        } else if (strncmp((char*)USB_RX_Buffer, "GET_DELAY_TR", 12) == 0) {
@@ -1820,37 +1876,37 @@ void DisplayAllVariables(void) {
         sprintf(buffer, "Ti = %f\n", Ti);
         SendUSBMessage(buffer);
 
-        sprintf(buffer, "Vref = %hu\n", Vref);
+        sprintf(buffer, "vref = %hu\n", vref);
         SendUSBMessage(buffer);
 
-        sprintf(buffer, "IMAX1 = %f\n", IMAX1);
+        sprintf(buffer, "imax1 = %f\n", imax1);
         SendUSBMessage(buffer);
 
-        sprintf(buffer, "IMAX2 = %f\n", IMAX2);
+        sprintf(buffer, "imax2 = %f\n", imax2);
         SendUSBMessage(buffer);
 
-        sprintf(buffer, "IMIN = %f\n", IMIN);
+        sprintf(buffer, "imin = %f\n", imin);
         SendUSBMessage(buffer);
 
-        sprintf(buffer, "INPUT_VOLTAGE = %f\n", INPUT_VOLTAGE);
+        sprintf(buffer, "input_voltage = %f\n", input_voltage);
         SendUSBMessage(buffer);
 
-        sprintf(buffer, "OUTPUT_VOLTAGE = %f\n", OUTPUT_VOLTAGE);
+        sprintf(buffer, "output_voltage = %f\n", output_voltage);
         SendUSBMessage(buffer);
 
-        sprintf(buffer, "PCB_TEMP = %f\n", PCB_TEMP);
+        sprintf(buffer, "pcb_temp = %f\n", pcb_temp);
         SendUSBMessage(buffer);
 
-        sprintf(buffer, "HEAT_SINK_TEMP = %f\n", HEAT_SINK_TEMP);
+        sprintf(buffer, "heat_sink_temp = %f\n", heat_sink_temp);
         SendUSBMessage(buffer);
 
-        sprintf(buffer, "CURRENT_SENSOR1_VREF = %f\n", CURRENT_SENSOR1_VREF);
+        sprintf(buffer, "current_sensor1_vref = %f\n", current_sensor1_vref);
         SendUSBMessage(buffer);
 
-        sprintf(buffer, "CURRENT_SENSOR2_VREF = %f\n", CURRENT_SENSOR2_VREF);
+        sprintf(buffer, "current_sensor2_vref = %f\n", current_sensor2_vref);
         SendUSBMessage(buffer);
 
-        sprintf(buffer, "IMAX2_SUM = %f\n", IMAX2_SUM);
+        sprintf(buffer, "imax2_sum = %f\n", imax2_sum);
         SendUSBMessage(buffer);
 
         sprintf(buffer, "delay_tr = %f\n", delay_tr);
