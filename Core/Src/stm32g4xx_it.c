@@ -60,6 +60,7 @@ extern PCD_HandleTypeDef hpcd_USB_FS;
 extern DMA_HandleTypeDef hdma_adc3;
 extern DMA_HandleTypeDef hdma_adc4;
 extern DMA_HandleTypeDef hdma_adc5;
+extern CORDIC_HandleTypeDef hcordic;
 extern DMA_HandleTypeDef hdma_dac1_ch1;
 extern DMA_HandleTypeDef hdma_dac2_ch1;
 extern DAC_HandleTypeDef hdac1;
@@ -326,6 +327,20 @@ void TIM6_DAC_IRQHandler(void)
   /* USER CODE BEGIN TIM6_DAC_IRQn 1 */
 
   /* USER CODE END TIM6_DAC_IRQn 1 */
+}
+
+/**
+  * @brief This function handles CORDIC interrupt.
+  */
+void CORDIC_IRQHandler(void)
+{
+  /* USER CODE BEGIN CORDIC_IRQn 0 */
+
+  /* USER CODE END CORDIC_IRQn 0 */
+  HAL_CORDIC_IRQHandler(&hcordic);
+  /* USER CODE BEGIN CORDIC_IRQn 1 */
+
+  /* USER CODE END CORDIC_IRQn 1 */
 }
 
 /* USER CODE BEGIN 1 */

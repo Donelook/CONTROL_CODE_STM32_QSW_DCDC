@@ -75,6 +75,8 @@ DMA_HandleTypeDef hdma_adc3;
 DMA_HandleTypeDef hdma_adc4;
 DMA_HandleTypeDef hdma_adc5;
 
+CORDIC_HandleTypeDef hcordic;
+
 DAC_HandleTypeDef hdac1;
 DAC_HandleTypeDef hdac2;
 DMA_HandleTypeDef hdma_dac1_ch1;
@@ -112,6 +114,7 @@ static void MX_TIM15_Init(void);
 static void MX_TIM16_Init(void);
 static void MX_TIM7_Init(void);
 static void MX_TIM6_Init(void);
+static void MX_CORDIC_Init(void);
 /* USER CODE BEGIN PFP */
 
 // Simple moving average filter
@@ -166,7 +169,7 @@ uint16_t step_size = 0.00125;
 uint32_t output_voltage = 0; 	// Measured voltage 0.2V BIAS
 uint16_t vout = 0; 				//Voltage comparing to vref
 uint16_t Vramp = 0; 			// ramp voltage
-volatile static uint16_t adc4_dma_buffer;
+volatile static uint16_t adc4_dma_buffer[2];
 volatile static uint16_t adc4_measurments;
 uint8_t RAMP();
 void regulatorPI(uint32_t *out, uint32_t *integral, float in, float in_zad, float limp, float limn, float kp, float ti, float Ts1);
@@ -272,6 +275,7 @@ int main(void)
   MX_TIM16_Init();
   MX_TIM7_Init();
   MX_TIM6_Init();
+  MX_CORDIC_Init();
   /* USER CODE BEGIN 2 */
 
 
@@ -296,7 +300,7 @@ int main(void)
 	  	  	  	  }
 
 	  	  	  	  uint8_t interlock = HAL_GPIO_ReadPin(INTERLOCK_GPIO_Port, INTERLOCK_Pin);
-	  	          if (interlock == 1 && start_program && Check_Faults()   && Check_Ready()/* start_program condition */) {
+	  	          if (interlock && start_program && Check_Faults()   && Check_Ready()/* start_program condition */) {
 	  	        	//USB_SendString("State: EVENT start_program \r\n");
 	  	              event = EVENT_START;
 	  	          } else if (HAL_GPIO_ReadPin(INTERLOCK_GPIO_Port, INTERLOCK_Pin)/* fault condition */) {
@@ -318,16 +322,21 @@ int main(void)
 	  	              {
 	  	            	  //GPIOs
 	  	            	  // CUrrent Sensors OCD pin needed to go low in reset condition after fault event
-	  	            	HAL_GPIO_WritePin(CS_OCD_1_GPIO_Port, CS_OCD_1_Pin, GPIO_PIN_SET);
-	  	            	HAL_GPIO_WritePin(CS_OCD_2_GPIO_Port, CS_OCD_2_Pin, GPIO_PIN_SET);
-	  	            	HAL_GPIO_WritePin(RESET_INTERLOCK_GPIO_Port, RESET_INTERLOCK_Pin, GPIO_PIN_SET);
+	  	            	//HAL_GPIO_WritePin(CS_OCD_1_GPIO_Port, CS_OCD_1_Pin, GPIO_PIN_SET);
+	  	            	//HAL_GPIO_WritePin(CS_OCD_2_GPIO_Port, CS_OCD_2_Pin, GPIO_PIN_SET);
+	  	            	HAL_GPIO_WritePin(RESET_FPGA_GPIO_Port, RESET_FPGA_Pin, 1); // RESET =  1  = reset turn on IMPORTANT!! WAZNE!!!
 
+	  	            	HAL_GPIO_WritePin(START_STOP_FPGA_GPIO_Port, START_STOP_FPGA_Pin, GPIO_PIN_RESET); // STOP
+
+	  	            	HAL_GPIO_WritePin(RESET_INTERLOCK_GPIO_Port, RESET_INTERLOCK_Pin, GPIO_PIN_SET);
+	  	            	HAL_Delay(1000);
+	  	            	HAL_GPIO_WritePin(RESET_INTERLOCK_GPIO_Port, RESET_INTERLOCK_Pin, GPIO_PIN_RESET);
 	  	            	  // Start PWM for delay time transfer to FPGA
 	  	            	HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
 	  	            	HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_2);
 
 	  	            	// Timer for clear fault  event to reset current sensor by pull down OCD pins
-	  	            	HAL_TIM_PWM_Start(&htim16, TIM_CHANNEL_1);
+	  	            	//HAL_TIM_PWM_Start(&htim16, TIM_CHANNEL_1);
 
 	  	            	  //DAC for  current reference
 	  	            	  ///DAC1_OUT1 	- MAX1
@@ -348,8 +357,9 @@ int main(void)
 	  	            	HAL_ADCEx_Calibration_Start(&hadc4, ADC_SINGLE_ENDED);
 	  	            	HAL_ADCEx_Calibration_Start(&hadc5, ADC_SINGLE_ENDED);
 	  	            	HAL_ADC_Start_DMA(&hadc3, (uint32_t*)adc3_dma_buffer, 5);
-	  	            	HAL_ADC_Start_DMA(&hadc4, (uint32_t*)adc4_dma_buffer, 1);
-	  	            	HAL_ADC_Start_DMA(&hadc5, (uint32_t*)adc5_dma_buffer, 1);
+	  	            	HAL_ADC_Start_DMA(&hadc4, (uint32_t*)adc4_dma_buffer, 2);
+
+	  	            	HAL_ADC_Start_DMA(&hadc5, (uint32_t*)adc5_dma_buffer, 10);
 
 	  	            	//Set_PWM_DutyCycle(50);
 	  	            	currentState = STATE_STANDBY;
@@ -358,7 +368,7 @@ int main(void)
 	  	              case STATE_STANDBY:
 	  	                  // Wait for start_program signal
 	  	              {
-	  	            	  if(start_program){
+	  	            	  if(start_program && HAL_GPIO_ReadPin(INTERLOCK_GPIO_Port, INTERLOCK_Pin) && start_program && Check_Faults()   && Check_Ready()){
 	  	            		  currentState = STATE_SOFT_START;
 	  	            	  }
 
@@ -369,10 +379,11 @@ int main(void)
 	  	              {
 	  	            	current_sensor1_vref = adc3_dma_buffer[0]*3300/4096;//(Low_pass_filter(adc3_dma_buffer[0], pcb_temp)/4096)*3.3;
 	  	            	current_sensor2_vref = adc3_dma_buffer[1]*3300/4096;//(Low_pass_filter(adc3_dma_buffer[1], pcb_temp)/4096)*3.3;
+
 	  	            	  //Start timer that start_program ramp and pi regulation
-	  	            	//	HAL_GPIO_WritePin(RESET_FPGA_GPIO_Port, RESET_FPGA_GPIO_Port, 0); // RESET =  1  = reset turn on
-	  	            	//	HAL_GPIO_WritePin(START_STOP_FPGA_GPIO_Port, START_STOP_FPGA_Pin, 1);
-	  	            	HAL_TIM_Base_Start_IT(&htim15);
+	  	            	HAL_GPIO_WritePin(RESET_FPGA_GPIO_Port, RESET_FPGA_GPIO_Port, 0); // RESET =  1  = reset turn on
+	  	            	HAL_GPIO_WritePin(START_STOP_FPGA_GPIO_Port, START_STOP_FPGA_Pin, 1); // START FPGA DANCE
+	  	            	HAL_TIM_Base_Start_IT(&htim15); // START TIM15 THATS IS MAIN CONTROL LOOP
 	  	              }
 	  	                  break;
 	  	              case STATE_REGULATION:
@@ -387,20 +398,27 @@ int main(void)
 	  	                  // Handle fault condition
 	  	            	  // Turn off all gate drivers and stop FPGA
 	  	              {
-	  	            	HAL_GPIO_WritePin(RESET_FPGA_GPIO_Port, RESET_FPGA_Pin, 1); // RESET =  1  = reset turn on
-	  	            	HAL_GPIO_WritePin(START_STOP_FPGA_GPIO_Port, START_STOP_FPGA_Pin, 0);
+	  	            	HAL_GPIO_WritePin(RESET_FPGA_GPIO_Port, RESET_FPGA_Pin, 1); // RESET =  1  = reset turn on IMPORTANT!! WAZNE!!!
+
+	  	            	HAL_GPIO_WritePin(START_STOP_FPGA_GPIO_Port, START_STOP_FPGA_Pin, GPIO_PIN_RESET);
+	  	            	HAL_TIM_Base_Stop_IT(&htim15);
+
 	  	            	HAL_GPIO_WritePin(NOT_RST_1_GPIO_Port,NOT_RST_1_Pin, GPIO_PIN_RESET);
 	  	            	HAL_GPIO_WritePin(NOT_RST_2_GPIO_Port,NOT_RST_2_Pin, GPIO_PIN_RESET);
 	  	            	HAL_GPIO_WritePin(NOT_RST_3_GPIO_Port,NOT_RST_3_Pin, GPIO_PIN_RESET);
 	  	            	HAL_GPIO_WritePin(NOT_RST_4_GPIO_Port,NOT_RST_4_Pin, GPIO_PIN_RESET);
-	  	            	HAL_GPIO_WritePin(CS_OCD_1_GPIO_Port, CS_OCD_1_Pin, 0);
-	  	            	HAL_GPIO_WritePin(CS_OCD_2_GPIO_Port, CS_OCD_2_Pin, 0);
-	  	            	HAL_GPIO_WritePin(RESET_INTERLOCK_GPIO_Port, RESET_INTERLOCK_Pin, 1);
-	  	            	HAL_TIM_Base_Start(&htim7);
+
+	  	            	HAL_GPIO_WritePin(CS_OCD_1_GPIO_Port, CS_OCD_1_Pin, GPIO_PIN_RESET);
+	  	            	HAL_GPIO_WritePin(CS_OCD_2_GPIO_Port, CS_OCD_2_Pin, GPIO_PIN_RESET);
+
+	  	            	HAL_GPIO_WritePin(RESET_INTERLOCK_GPIO_Port, RESET_INTERLOCK_Pin, GPIO_PIN_SET);
+
+	  	            	HAL_TIM_Base_Start(&htim7); // timer for reset OCD and INTERLOCK reset turn off
 
 
-	  	            	HAL_TIM_Base_Stop_IT(&htim15);
+
 	  	            	start_program = 0;
+	  	            	currentState = STATE_STANDBY;
 	  	              }
 	  	                  break;
 	  	              case STATE_SHUTDOWN:
@@ -680,7 +698,7 @@ static void MX_ADC4_Init(void)
   hadc4.Init.ExternalTrigConv = ADC_SOFTWARE_START;
   hadc4.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
   hadc4.Init.DMAContinuousRequests = ENABLE;
-  hadc4.Init.Overrun = ADC_OVR_DATA_PRESERVED;
+  hadc4.Init.Overrun = ADC_OVR_DATA_OVERWRITTEN;
   hadc4.Init.OversamplingMode = DISABLE;
   if (HAL_ADC_Init(&hadc4) != HAL_OK)
   {
@@ -765,6 +783,32 @@ static void MX_ADC5_Init(void)
   /* USER CODE BEGIN ADC5_Init 2 */
 
   /* USER CODE END ADC5_Init 2 */
+
+}
+
+/**
+  * @brief CORDIC Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_CORDIC_Init(void)
+{
+
+  /* USER CODE BEGIN CORDIC_Init 0 */
+
+  /* USER CODE END CORDIC_Init 0 */
+
+  /* USER CODE BEGIN CORDIC_Init 1 */
+
+  /* USER CODE END CORDIC_Init 1 */
+  hcordic.Instance = CORDIC;
+  if (HAL_CORDIC_Init(&hcordic) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN CORDIC_Init 2 */
+
+  /* USER CODE END CORDIC_Init 2 */
 
 }
 
@@ -1057,9 +1101,9 @@ static void MX_TIM7_Init(void)
 
   /* USER CODE END TIM7_Init 1 */
   htim7.Instance = TIM7;
-  htim7.Init.Prescaler = 9;
+  htim7.Init.Prescaler = 14999;
   htim7.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim7.Init.Period = 99;
+  htim7.Init.Period = 9;
   htim7.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim7) != HAL_OK)
   {
@@ -1324,29 +1368,60 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOD_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOE, RESET_INTERLOCK_Pin|CS_OCD_1_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(RESET_INTERLOCK_GPIO_Port, RESET_INTERLOCK_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(CS_OCD_2_GPIO_Port, CS_OCD_2_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(RESET_FPGA_GPIO_Port, RESET_FPGA_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOC, START_STOP_FPGA_Pin|NOT_RST_4_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(START_STOP_FPGA_GPIO_Port, START_STOP_FPGA_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, NOT_RST_3_Pin|NOT_RST_2_Pin|NOT_RST_1_Pin|CS_OCD_2_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOE, NOT_RST_2_Pin|CS_OCD_1_Pin, GPIO_PIN_SET);
 
-  /*Configure GPIO pins : RESET_INTERLOCK_Pin CS_OCD_1_Pin */
-  GPIO_InitStruct.Pin = RESET_INTERLOCK_Pin|CS_OCD_1_Pin;
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(NOT_RST_4_GPIO_Port, NOT_RST_4_Pin, GPIO_PIN_SET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(NOT_RST_3_GPIO_Port, NOT_RST_3_Pin, GPIO_PIN_SET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(NOT_RST_1_GPIO_Port, NOT_RST_1_Pin, GPIO_PIN_SET);
+
+  /*Configure GPIO pins : NOT_FAULT_1_Pin CS_FAULT_2_Pin NOT_FAULT_2_Pin CS_FAULT_1_Pin */
+  GPIO_InitStruct.Pin = NOT_FAULT_1_Pin|CS_FAULT_2_Pin|NOT_FAULT_2_Pin|CS_FAULT_1_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : RESET_INTERLOCK_Pin */
+  GPIO_InitStruct.Pin = RESET_INTERLOCK_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
+  HAL_GPIO_Init(RESET_INTERLOCK_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : INTERLOCK_Pin */
-  GPIO_InitStruct.Pin = INTERLOCK_Pin;
+  /*Configure GPIO pin : CS_OCD_2_Pin */
+  GPIO_InitStruct.Pin = CS_OCD_2_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_OD;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(CS_OCD_2_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : READY_3_Pin */
+  GPIO_InitStruct.Pin = READY_3_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(INTERLOCK_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(READY_3_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : INTERLOCK_Pin NOT_FAULT_4_Pin */
+  GPIO_InitStruct.Pin = INTERLOCK_Pin|NOT_FAULT_4_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
   /*Configure GPIO pin : RESET_FPGA_Pin */
   GPIO_InitStruct.Pin = RESET_FPGA_Pin;
@@ -1355,39 +1430,58 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(RESET_FPGA_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : START_STOP_FPGA_Pin NOT_RST_4_Pin */
-  GPIO_InitStruct.Pin = START_STOP_FPGA_Pin|NOT_RST_4_Pin;
+  /*Configure GPIO pin : START_STOP_FPGA_Pin */
+  GPIO_InitStruct.Pin = START_STOP_FPGA_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+  HAL_GPIO_Init(START_STOP_FPGA_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : READY_4_Pin READY_3_Pin READY_2_Pin READY_1_Pin
-                           PD5 NOT_FAULT_3_Pin NOT_FAULT_2_Pin */
-  GPIO_InitStruct.Pin = READY_4_Pin|READY_3_Pin|READY_2_Pin|READY_1_Pin
-                          |GPIO_PIN_5|NOT_FAULT_3_Pin|NOT_FAULT_2_Pin;
+  /*Configure GPIO pin : READY_2_Pin */
+  GPIO_InitStruct.Pin = READY_2_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(READY_2_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : NOT_RST_2_Pin CS_OCD_1_Pin */
+  GPIO_InitStruct.Pin = NOT_RST_2_Pin|CS_OCD_1_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_OD;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : NOT_RST_4_Pin */
+  GPIO_InitStruct.Pin = NOT_RST_4_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_OD;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(NOT_RST_4_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : READY_4_Pin */
+  GPIO_InitStruct.Pin = READY_4_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(READY_4_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : NOT_RST_3_Pin */
+  GPIO_InitStruct.Pin = NOT_RST_3_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_OD;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(NOT_RST_3_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : READY_1_Pin PD5 NOT_FAULT_3_Pin */
+  GPIO_InitStruct.Pin = READY_1_Pin|GPIO_PIN_5|NOT_FAULT_3_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : NOT_FAULT_1_Pin CS_FAULT_2_Pin */
-  GPIO_InitStruct.Pin = NOT_FAULT_1_Pin|CS_FAULT_2_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
-
-  /*Configure GPIO pins : NOT_RST_3_Pin NOT_RST_2_Pin NOT_RST_1_Pin CS_OCD_2_Pin */
-  GPIO_InitStruct.Pin = NOT_RST_3_Pin|NOT_RST_2_Pin|NOT_RST_1_Pin|CS_OCD_2_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  /*Configure GPIO pin : NOT_RST_1_Pin */
+  GPIO_InitStruct.Pin = NOT_RST_1_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_OD;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : CS_FAULT_1_Pin */
-  GPIO_InitStruct.Pin = CS_FAULT_1_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(CS_FAULT_1_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(NOT_RST_1_GPIO_Port, &GPIO_InitStruct);
 
 /* USER CODE BEGIN MX_GPIO_Init_2 */
 /* USER CODE END MX_GPIO_Init_2 */
@@ -1488,7 +1582,7 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 		       // adc5_data_ready = 1; // Set flag to indicate new data is ready
 
 		        // Restart the DMA transfer
-		        HAL_ADC_Start_DMA(hadc, (uint32_t*)adc5_dma_buffer, MA_WINDOW_SIZE);
+		       // HAL_ADC_Start_DMA(hadc, (uint32_t*)adc5_dma_buffer, MA_WINDOW_SIZE);
 		    }
 
 
@@ -1597,15 +1691,16 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
 		//current_sensor2_vref = adc3_dma_buffer[1]*3300/4096;//(Low_pass_filter(adc3_dma_buffer[1], pcb_temp)/4096)*3.3;
 
 		input_voltage = (adc3_dma_buffer[2]*3300)/4096;//((Low_pass_filter(adc3_dma_buffer[2], input_voltage)/4096)*3.3-0.2)*27.1;
-		output_voltage = 1;//adc4_dma_buffer*3300/4096;//((Low_pass_filter(adc4_dma_buffer, output_voltage)/4096)*3.3-0.2)*27.1;
+		output_voltage = (adc4_dma_buffer[1]*3300)/4096;//((Low_pass_filter(adc4_dma_buffer, output_voltage)/4096)*3.3-0.2)*27.1;
 
 		imax2_sum = (adc_moving_average-1.45)*0.384; // 0.20V - -0.5A || 1.45v - 0A || 2.77V - 0.5A		0.384 A/V
-		float Gv = 1;//output_voltage/input_voltage;
+		float Gv = output_voltage/input_voltage;//output_voltage/input_voltage;
 
 		if(Gv<2) //CZARY
 		{
 			delay_tr = acos(1-Gv)/wr;
 			imin = output_voltage*sqrt((2-Gv)/Gv)/Z; // Negative current needed to Zero voltage switching in resonance
+
 		} else if(Gv>=2)
 		{
 			delay_tr = (M_PI-acos(1/(Gv-1)))/wr;
@@ -1647,11 +1742,11 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
 
 	if (htim->Instance == TIM7)
 	    {
-	        // Turn off OCD pins of currents sensors to reset current sensor
+	        // Turn off OCD pins of currents sensors to reset current sensor 1us
 
 	        HAL_GPIO_TogglePin(CS_OCD_1_GPIO_Port, CS_OCD_1_Pin);
 	        HAL_GPIO_TogglePin(CS_OCD_2_GPIO_Port, CS_OCD_2_Pin);
-	        HAL_GPIO_WritePin(RESET_INTERLOCK_GPIO_Port, RESET_INTERLOCK_Pin, 0);
+	        HAL_GPIO_WritePin(RESET_INTERLOCK_GPIO_Port, RESET_INTERLOCK_Pin, GPIO_PIN_RESET);
 	        // Stop the timer
 	        HAL_TIM_Base_Stop_IT(&htim7);
 	    }
@@ -1764,7 +1859,7 @@ void FAN_Drive()
 		    	duty_cycle = 99;
 		}
 
-		Set_PWM_DutyCycle(duty_cycle);
+		//Set_PWM_DutyCycle(duty_cycle);
 
 }
 
