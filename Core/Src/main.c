@@ -143,8 +143,8 @@ uint8_t Check_Ready();
 /* USER CODE BEGIN 0 */
 uint16_t dac_buffer[BUFFER_SIZE];
 void Read_ADC3(void);
-uint32_t current_sensor1_vref = 0; // 1.5V - 0 A
-uint32_t current_sensor2_vref = 0; // 1.5V - 0 A
+uint16_t current_sensor1_vref = 0; // 1.5V - 0 A
+uint16_t current_sensor2_vref = 0; // 1.5V - 0 A
 uint32_t imax1 = 0;
 uint32_t imax2 = 0;
 uint32_t imin = 0;
@@ -164,18 +164,19 @@ uint16_t adc3_moving_average[5][MA_WINDOW_SIZE];
  * 3 - PCB temperature (MCP9700)
  * 4 - Heatsink Temprature (TMP236)
  */
-uint16_t vref = 48; 			//  Reference voltage its compare to output voltage
+uint16_t vref = 48000; 			//[mV]  Reference voltage its compare to output voltage
 uint16_t step_size = 0.00125;
 uint32_t output_voltage = 0; 	// Measured voltage 0.2V BIAS
 uint16_t vout = 0; 				//Voltage comparing to vref
 uint16_t Vramp = 0; 			// ramp voltage
 volatile static uint16_t adc4_dma_buffer[2];
 volatile static uint16_t adc4_measurments;
-uint8_t RAMP();
+void RAMP();
+uint8_t RAMP_FINISHED = 0;
 void regulatorPI(uint32_t *out, uint32_t *integral, float in, float in_zad, float limp, float limn, float kp, float ti, float Ts1);
 float delay_tr = 0; // DELAY/DEADTIME after first stage inductor  positive ramp
 float delay_hc = 0; // DELAY/DEADTIME after second stage inductor negative ramp
-
+float Gv = 1;
 //Filter butterworth 500khz sampleing rate 200khz cutoff
 /*#define N 4 // Order of the filter
 float x[N+1] = {0}; // Input samples
@@ -215,18 +216,24 @@ void DisplayAllVariables(void);
 volatile uint8_t dataReceivedFlag = 0; // Flags to indicate new data received
 
 
-//Regulator PI
-float Kp = 0.15; 			// Proportional part of PI
-float Ti = 0.005; 			// Integral part of PI
-float LIM_PEAK_POS = 40; 	// Positive limit for PI regulator
-float LIM_PEAK_NEG = -4; 	// Negative limit for PI regulator
+//Regulator PI of voltage
+float Kp = 0.3; 			// Proportional part of PI
+float Ti = 0.0005; 			// Integral part of PI
+uint32_t LIM_PEAK_POS = 40000; 	// Positive limit for PI regulator [mA]
+uint32_t LIM_PEAK_NEG = 0; 	// Negative limit for PI regulator [mA]
 uint32_t Integral_I = 0;		// Integral part of PI
-float prev_delta = 0; 		// buffer  error n-1
+uint32_t prev_delta = 0; 		// buffer  error n-1
 
 uint8_t start_program = 0;
 uint8_t clear_fault = 0;
 ConverterEvent event = EVENT_SHUTDOWN;
 ConverterState currentState = STATE_INIT;
+
+int duty_cycle = 20;
+
+uint8_t checkfaults = 0;
+uint8_t checkreads = 0;
+
 
 /* USER CODE END 0 */
 
@@ -290,7 +297,8 @@ int main(void)
   while (1)
   {
 
-
+	  checkfaults = Check_Faults();
+	  checkreads = Check_Ready();
 	  	  	  	  if (dataReceivedFlag) {
 	  	  	  	      // Process the data
 	  	  	  	      ParseUSBCommand();  // Function to handle the received command
@@ -300,10 +308,10 @@ int main(void)
 	  	  	  	  }
 
 	  	  	  	  uint8_t interlock = HAL_GPIO_ReadPin(INTERLOCK_GPIO_Port, INTERLOCK_Pin);
-	  	          if (interlock && start_program && Check_Faults()   && Check_Ready()/* start_program condition */) {
+	  	          if (/*interlock && */ start_program && !(Check_Faults())   && Check_Ready()/* start_program condition */) {
 	  	        	//USB_SendString("State: EVENT start_program \r\n");
 	  	              event = EVENT_START;
-	  	          } else if (HAL_GPIO_ReadPin(INTERLOCK_GPIO_Port, INTERLOCK_Pin)/* fault condition */) {
+	  	          } else if (/*HAL_GPIO_ReadPin(INTERLOCK_GPIO_Port, INTERLOCK_Pin)*/Check_Faults() /* fault condition */) {
 	  	              event = EVENT_FAULT;
 	  	          } else if (clear_fault) {
 	  	        	  /* clear fault condition */
@@ -320,8 +328,8 @@ int main(void)
 	  	              case STATE_INIT:
 	  	                  // Initialize hardware
 	  	              {
-	  	            	  //GPIOs
-	  	            	  // CUrrent Sensors OCD pin needed to go low in reset condition after fault event
+	  	            	//GPIOs
+	  	            	//CUrrent Sensors OCD pin needed to go low in reset condition after fault event
 	  	            	//HAL_GPIO_WritePin(CS_OCD_1_GPIO_Port, CS_OCD_1_Pin, GPIO_PIN_SET);
 	  	            	//HAL_GPIO_WritePin(CS_OCD_2_GPIO_Port, CS_OCD_2_Pin, GPIO_PIN_SET);
 	  	            	HAL_GPIO_WritePin(RESET_FPGA_GPIO_Port, RESET_FPGA_Pin, 1); // RESET =  1  = reset turn on IMPORTANT!! WAZNE!!!
@@ -356,19 +364,19 @@ int main(void)
 	  	            	HAL_ADCEx_Calibration_Start(&hadc3, ADC_SINGLE_ENDED);
 	  	            	HAL_ADCEx_Calibration_Start(&hadc4, ADC_SINGLE_ENDED);
 	  	            	HAL_ADCEx_Calibration_Start(&hadc5, ADC_SINGLE_ENDED);
+
 	  	            	HAL_ADC_Start_DMA(&hadc3, (uint32_t*)adc3_dma_buffer, 5);
 	  	            	HAL_ADC_Start_DMA(&hadc4, (uint32_t*)adc4_dma_buffer, 2);
-
 	  	            	HAL_ADC_Start_DMA(&hadc5, (uint32_t*)adc5_dma_buffer, 10);
 
-	  	            	//Set_PWM_DutyCycle(50);
+	  	            	Set_PWM_DutyCycle(20);
 	  	            	currentState = STATE_STANDBY;
 	  	              }
 	  	                  break;
 	  	              case STATE_STANDBY:
 	  	                  // Wait for start_program signal
 	  	              {
-	  	            	  if(start_program && HAL_GPIO_ReadPin(INTERLOCK_GPIO_Port, INTERLOCK_Pin) && start_program && Check_Faults()   && Check_Ready()){
+	  	            	  if(start_program && /*HAL_GPIO_ReadPin(INTERLOCK_GPIO_Port, INTERLOCK_Pin)*/   !(Check_Faults())   && Check_Ready()){
 	  	            		  currentState = STATE_SOFT_START;
 	  	            	  }
 
@@ -377,11 +385,11 @@ int main(void)
 	  	              case STATE_SOFT_START:
 	  	                  // Gradually ramp up the output
 	  	              {
-	  	            	current_sensor1_vref = adc3_dma_buffer[0]*3300/4096;//(Low_pass_filter(adc3_dma_buffer[0], pcb_temp)/4096)*3.3;
-	  	            	current_sensor2_vref = adc3_dma_buffer[1]*3300/4096;//(Low_pass_filter(adc3_dma_buffer[1], pcb_temp)/4096)*3.3;
+	  	            	current_sensor1_vref = adc3_dma_buffer[0];// reference for imax imin
+	  	            	current_sensor2_vref = adc3_dma_buffer[1];// reference for imax imin
 
 	  	            	  //Start timer that start_program ramp and pi regulation
-	  	            	HAL_GPIO_WritePin(RESET_FPGA_GPIO_Port, RESET_FPGA_GPIO_Port, 0); // RESET =  1  = reset turn on
+	  	            	HAL_GPIO_WritePin(RESET_FPGA_GPIO_Port, RESET_FPGA_Pin, 0); // RESET =  0  = reset turn off
 	  	            	HAL_GPIO_WritePin(START_STOP_FPGA_GPIO_Port, START_STOP_FPGA_Pin, 1); // START FPGA DANCE
 	  	            	HAL_TIM_Base_Start_IT(&htim15); // START TIM15 THATS IS MAIN CONTROL LOOP
 	  	              }
@@ -1507,7 +1515,7 @@ ConverterState handle_event(ConverterState currentState, ConverterEvent event) {
             if (event == EVENT_FAULT)
             {
                 return STATE_FAULT;
-            } else if (RAMP()) {
+            } else if (RAMP_FINISHED) {
                 return STATE_REGULATION;
             }
             break;
@@ -1660,10 +1668,10 @@ uint8_t Check_Faults()
 {
 	// Faults pins are from gate driver and they are active pull down
 	// 4 fault pins from 4 gate driver + 2 fault pins from  2 currents sensors  = 6 pins
-	if(HAL_GPIO_ReadPin(CS_FAULT_1_GPIO_Port, CS_FAULT_1_Pin) || HAL_GPIO_ReadPin(CS_FAULT_2_GPIO_Port, CS_FAULT_2_Pin)
-			|| HAL_GPIO_ReadPin(NOT_FAULT_1_GPIO_Port, NOT_FAULT_1_Pin) || HAL_GPIO_ReadPin(NOT_FAULT_2_GPIO_Port, NOT_FAULT_2_Pin)
-			|| HAL_GPIO_ReadPin(NOT_FAULT_3_GPIO_Port, NOT_FAULT_3_Pin) || HAL_GPIO_ReadPin(NOT_RST_4_GPIO_Port, NOT_RST_4_Pin) )
-		return 0;// if there is some fault return 0
+	if(HAL_GPIO_ReadPin(CS_FAULT_1_GPIO_Port, CS_FAULT_1_Pin) && HAL_GPIO_ReadPin(CS_FAULT_2_GPIO_Port, CS_FAULT_2_Pin)
+			&& HAL_GPIO_ReadPin(NOT_FAULT_1_GPIO_Port, NOT_FAULT_1_Pin) && HAL_GPIO_ReadPin(NOT_FAULT_2_GPIO_Port, NOT_FAULT_2_Pin)
+			&& HAL_GPIO_ReadPin(NOT_FAULT_3_GPIO_Port, NOT_FAULT_3_Pin) && HAL_GPIO_ReadPin(NOT_RST_4_GPIO_Port, NOT_RST_4_Pin) )
+		return 0; // if all pins is 1 then all is ready, there is not faults then return 0
 
 	return 1;
 }
@@ -1690,16 +1698,16 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
 		//current_sensor1_vref = adc3_dma_buffer[0]*3300/4096;//(Low_pass_filter(adc3_dma_buffer[0], pcb_temp)/4096)*3.3;
 		//current_sensor2_vref = adc3_dma_buffer[1]*3300/4096;//(Low_pass_filter(adc3_dma_buffer[1], pcb_temp)/4096)*3.3;
 
-		input_voltage = (adc3_dma_buffer[2]*3300)/4096;//((Low_pass_filter(adc3_dma_buffer[2], input_voltage)/4096)*3.3-0.2)*27.1;
-		output_voltage = (adc4_dma_buffer[1]*3300)/4096;//((Low_pass_filter(adc4_dma_buffer, output_voltage)/4096)*3.3-0.2)*27.1;
+		input_voltage = (int)((((adc3_dma_buffer[2])*3300)/4096-200)*18.81);//[mV]		((Low_pass_filter(adc3_dma_buffer[2], input_voltage)/4096)*3.3-0.2)*27.1;
+		output_voltage = (int)((((adc4_dma_buffer[1])*3300)/4096-200)*18.81);//[mV] 		((Low_pass_filter(adc4_dma_buffer, output_voltage)/4096)*3.3-0.2)*27.1;
 
-		imax2_sum = (adc_moving_average-1.45)*0.384; // 0.20V - -0.5A || 1.45v - 0A || 2.77V - 0.5A		0.384 A/V
-		float Gv = output_voltage/input_voltage;//output_voltage/input_voltage;
+		imax2_sum = (adc_moving_average-1450)*0.384; //[mA] 0.20V - -0.5A || 1.45v - 0A || 2.77V - 0.5A		0.384 A/V
+		Gv = output_voltage/input_voltage;//output_voltage/input_voltage;
 
 		if(Gv<2) //CZARY
 		{
 			delay_tr = acos(1-Gv)/wr;
-			imin = output_voltage*sqrt((2-Gv)/Gv)/Z; // Negative current needed to Zero voltage switching in resonance
+			imin = output_voltage*sqrt((2-Gv)/Gv)/Z; //[mA] Negative current needed to Zero voltage switching in resonance
 
 		} else if(Gv>=2)
 		{
@@ -1715,7 +1723,8 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
 
 		regulatorPI(&imax1, &Integral_I, output_voltage, Vramp, LIM_PEAK_POS, LIM_PEAK_NEG, Kp, Ti, Ts);
 
-		if(output_voltage>1){
+		if(output_voltage>19000)
+		{
 		delay_hc = (2*C_CAP*output_voltage)/imax1;
 		int delay_hc_freq = 1/delay_hc;
 		Update_PWM_Frequency(&htim8, TIM_CHANNEL_1, delay_hc_freq); // Set TIM8 CH1 o freq that is delay hc and send to fpga
@@ -1723,9 +1732,9 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
 
 		imax2 = imax1 + imax2_sum; // imax2_sum signal from FPGA
 		// imax1,2 each for branches to make 180 degree shift
-		HAL_DAC_SetValue(&hdac1, DAC_CHANNEL_1, DAC_ALIGN_12B_R, 2048+((int)imax1*25)); // imax1  1.5V is 0A;  1A is 20mV; 1 bit is 0.8mV; x A * 0.02V / 0.0008V = Value for DAC
-		HAL_DAC_SetValue(&hdac1, DAC_CHANNEL_2, DAC_ALIGN_12B_R, 2048+((int)imax2*25)); // imax2
-		HAL_DAC_SetValue(&hdac2, DAC_CHANNEL_1, DAC_ALIGN_12B_R, 2048+((int)imin*25)); // imin*/
+		HAL_DAC_SetValue(&hdac1, DAC_CHANNEL_1, DAC_ALIGN_12B_R, current_sensor1_vref+((int)imax1*0.025)); // imax1  1.5V is 0A;  1A is 20mV; 1 bit is 0.8mV; imax[mA]*0.02 [V/A]/0.8[mV] = Value for DAC
+		HAL_DAC_SetValue(&hdac1, DAC_CHANNEL_2, DAC_ALIGN_12B_R, current_sensor2_vref+((int)imax2*0.025)); // imax2
+		HAL_DAC_SetValue(&hdac2, DAC_CHANNEL_1, DAC_ALIGN_12B_R, current_sensor1_vref+((int)imin*0.25)); // imin uzyto tutaj wzmacniacza 10x dla sygnalu z sensora pradu wiec ma wzmocnienie 200mv/A a nie 20mv/a
 
 		}
 		//HAL_TIM_Base_Stop_IT(&htim15);
@@ -1754,20 +1763,24 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
 
 }
 
-uint8_t RAMP()
+void RAMP()
 {
 	// RAMP Voltage to soft-start
-				if((vout-vref)<1)
+				if((vref-output_voltage)>100)
 				{
-					Vramp = vout+vref*step_size; // 1s ramp 0 to 800V
-					return 0; // not finished ramp
+					Vramp = output_voltage+200000*Ts; // 1s ramp 0 to 800V
+					RAMP_FINISHED = 0;
 				}
-				else if((vout-vref)>1)
+				else if((vref-output_voltage)<-100)
 				{
-					Vramp = vref;
-					return 1; // Finished ramp
+					Vramp = output_voltage-200000*Ts;
 				}
-				return 0;
+				else if(Vramp>50000)
+				{
+					Vramp = 48000; // 48V
+				}
+
+
 }
 
 void regulatorPI(uint32_t *out, uint32_t *integral, float in, float in_zad, float limp, float limn, float kp, float ti, float Ts1)
@@ -1786,7 +1799,7 @@ void regulatorPI(uint32_t *out, uint32_t *integral, float in, float in_zad, floa
     {
         *integral = limn;
     }
-    *out = (delta * kp + *integral)/1000; // Sum of P and I
+    *out = (delta * kp + *integral); // Sum of P and I
     if (*out >= limp) // limit peak positive
     {
         *out = limp;
@@ -1837,7 +1850,6 @@ void FAN_Drive()
 		pcb_temp = (adc3_dma_buffer[3]*3300)/4096;//(Low_pass_filter(adc3_dma_buffer[3], pcb_temp)/4096)*3.3;
 		heat_sink_temp = (adc3_dma_buffer[4]*3300)/4096;//(Low_pass_filter(adc3_dma_buffer[4], heat_sink_temp)/4096)*3.3;
 
-		int duty_cycle = 20;
 		uint32_t temperature = 20;
 
 		pcb_temp = (pcb_temp-400)/20;
