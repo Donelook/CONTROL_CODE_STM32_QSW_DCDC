@@ -219,7 +219,7 @@ volatile uint8_t dataReceivedFlag = 0; // Flags to indicate new data received
 //Regulator PI of voltage
 float Kp = 0.3; 			// Proportional part of PI
 float Ti = 0.0005; 			// Integral part of PI
-uint32_t LIM_PEAK_POS = 40000; 	// Positive limit for PI regulator [mA]
+uint32_t LIM_PEAK_POS = 5000; 	// Positive limit for PI regulator [mA]
 uint32_t LIM_PEAK_NEG = 0; 	// Negative limit for PI regulator [mA]
 uint32_t Integral_I = 0;		// Integral part of PI
 uint32_t prev_delta = 0; 		// buffer  error n-1
@@ -617,8 +617,8 @@ static void MX_ADC3_Init(void)
   sConfig.Rank = ADC_REGULAR_RANK_1;
   sConfig.SamplingTime = ADC_SAMPLETIME_2CYCLES_5;
   sConfig.SingleDiff = ADC_SINGLE_ENDED;
-  sConfig.OffsetNumber = ADC_OFFSET_2;
-  sConfig.Offset = 37;
+  sConfig.OffsetNumber = ADC_OFFSET_1;
+  sConfig.Offset = 38;
   sConfig.OffsetSign = ADC_OFFSET_SIGN_POSITIVE;
   sConfig.OffsetSaturation = DISABLE;
   if (HAL_ADC_ConfigChannel(&hadc3, &sConfig) != HAL_OK)
@@ -630,7 +630,8 @@ static void MX_ADC3_Init(void)
   */
   sConfig.Channel = ADC_CHANNEL_2;
   sConfig.Rank = ADC_REGULAR_RANK_2;
-  sConfig.OffsetNumber = ADC_OFFSET_1;
+  sConfig.OffsetNumber = ADC_OFFSET_2;
+  sConfig.Offset = 37;
   if (HAL_ADC_ConfigChannel(&hadc3, &sConfig) != HAL_OK)
   {
     Error_Handler();
@@ -640,7 +641,7 @@ static void MX_ADC3_Init(void)
   */
   sConfig.Channel = ADC_CHANNEL_3;
   sConfig.Rank = ADC_REGULAR_RANK_3;
-  sConfig.OffsetNumber = ADC_OFFSET_2;
+  sConfig.OffsetNumber = ADC_OFFSET_3;
   sConfig.Offset = 8;
   if (HAL_ADC_ConfigChannel(&hadc3, &sConfig) != HAL_OK)
   {
@@ -1702,7 +1703,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
 		output_voltage = (int)((((adc4_dma_buffer[1])*3300)/4096-200)*18.81);//[mV] 		((Low_pass_filter(adc4_dma_buffer, output_voltage)/4096)*3.3-0.2)*27.1;
 
 		imax2_sum = (adc_moving_average-1450)*0.384; //[mA] 0.20V - -0.5A || 1.45v - 0A || 2.77V - 0.5A		0.384 A/V
-		Gv = output_voltage/input_voltage;//output_voltage/input_voltage;
+		Gv = (float)output_voltage/(float)input_voltage;//output_voltage/input_voltage;
 
 		if(Gv<2) //CZARY
 		{
@@ -1716,6 +1717,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
 		}
 		if(delay_tr<0.01){
 		int delay_tr_freq = (int)(1/delay_tr);
+		if(delay_tr_freq>20000000) delay_tr_freq = 15000000;//10Mhz
 		Update_PWM_Frequency(&htim1, TIM_CHANNEL_1, delay_tr_freq); // Set TIM1 CH1 to freq that is delay tr and send to fpga
 		}
 
@@ -1726,8 +1728,9 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
 		if(output_voltage>19000)
 		{
 		delay_hc = (2*C_CAP*output_voltage)/imax1;
-		int delay_hc_freq = 1/delay_hc;
-		Update_PWM_Frequency(&htim8, TIM_CHANNEL_1, delay_hc_freq); // Set TIM8 CH1 o freq that is delay hc and send to fpga
+		int delay_hc_freq = (int)(1/delay_hc);
+		if(delay_hc_freq>20000000) delay_hc_freq = 15000000;//10Mhz jakis problem
+		Update_PWM_Frequency(&htim8, TIM_CHANNEL_2, delay_hc_freq); // Set TIM8 CH1 o freq that is delay hc and send to fpga
 		}
 
 		imax2 = imax1 + imax2_sum; // imax2_sum signal from FPGA
@@ -1768,16 +1771,17 @@ void RAMP()
 	// RAMP Voltage to soft-start
 				if((vref-output_voltage)>100)
 				{
-					Vramp = output_voltage+200000*Ts; // 1s ramp 0 to 800V
+					Vramp = output_voltage+4000000*Ts; // 200mV step per loop period
 					RAMP_FINISHED = 0;
 				}
 				else if((vref-output_voltage)<-100)
 				{
-					Vramp = output_voltage-200000*Ts;
+					Vramp = output_voltage-4000000*Ts;
 				}
-				else if(Vramp>50000)
+				else if(Vramp==48000)
 				{
 					Vramp = 48000; // 48V
+					RAMP_FINISHED = 1;
 				}
 
 
