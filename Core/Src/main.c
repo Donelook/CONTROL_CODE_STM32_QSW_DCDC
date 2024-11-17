@@ -234,6 +234,7 @@ int duty_cycle = 20;
 uint8_t checkfaults = 0;
 uint8_t checkreads = 0;
 
+float Imin_Factor = 2;
 
 /* USER CODE END 0 */
 
@@ -245,7 +246,7 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-
+	int once = 0;
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -308,7 +309,7 @@ int main(void)
 	  	  	  	  }
 
 	  	  	  	  uint8_t interlock = HAL_GPIO_ReadPin(INTERLOCK_GPIO_Port, INTERLOCK_Pin);
-	  	          if (/*interlock && */ start_program && !(Check_Faults())   && Check_Ready()/* start_program condition */) {
+	  	          if (interlock &&  start_program && !(Check_Faults())   && Check_Ready()/* start_program condition */) {
 	  	        	//USB_SendString("State: EVENT start_program \r\n");
 	  	              event = EVENT_START;
 	  	          } else if (/*HAL_GPIO_ReadPin(INTERLOCK_GPIO_Port, INTERLOCK_Pin)*/Check_Faults() /* fault condition */) {
@@ -370,6 +371,10 @@ int main(void)
 	  	            	HAL_ADC_Start_DMA(&hadc5, (uint32_t*)adc5_dma_buffer, 10);
 
 	  	            	Set_PWM_DutyCycle(20);
+
+	  	            	current_sensor1_vref = adc3_dma_buffer[0];// reference for imax imin
+	  	            	current_sensor2_vref = adc3_dma_buffer[1];// reference for imax imin
+
 	  	            	currentState = STATE_STANDBY;
 	  	              }
 	  	                  break;
@@ -385,13 +390,14 @@ int main(void)
 	  	              case STATE_SOFT_START:
 	  	                  // Gradually ramp up the output
 	  	              {
-	  	            	current_sensor1_vref = adc3_dma_buffer[0];// reference for imax imin
-	  	            	current_sensor2_vref = adc3_dma_buffer[1];// reference for imax imin
-
+	  	            	  if(once == 0){
 	  	            	  //Start timer that start_program ramp and pi regulation
 	  	            	HAL_GPIO_WritePin(RESET_FPGA_GPIO_Port, RESET_FPGA_Pin, 0); // RESET =  0  = reset turn off
 	  	            	HAL_GPIO_WritePin(START_STOP_FPGA_GPIO_Port, START_STOP_FPGA_Pin, 1); // START FPGA DANCE
 	  	            	HAL_TIM_Base_Start_IT(&htim15); // START TIM15 THATS IS MAIN CONTROL LOOP
+	  	            	  }
+
+	  	            	if(once==0) once = 1;
 	  	              }
 	  	                  break;
 	  	              case STATE_REGULATION:
@@ -1671,7 +1677,7 @@ uint8_t Check_Faults()
 	// 4 fault pins from 4 gate driver + 2 fault pins from  2 currents sensors  = 6 pins
 	if(HAL_GPIO_ReadPin(CS_FAULT_1_GPIO_Port, CS_FAULT_1_Pin) && HAL_GPIO_ReadPin(CS_FAULT_2_GPIO_Port, CS_FAULT_2_Pin)
 			&& HAL_GPIO_ReadPin(NOT_FAULT_1_GPIO_Port, NOT_FAULT_1_Pin) && HAL_GPIO_ReadPin(NOT_FAULT_2_GPIO_Port, NOT_FAULT_2_Pin)
-			&& HAL_GPIO_ReadPin(NOT_FAULT_3_GPIO_Port, NOT_FAULT_3_Pin) && HAL_GPIO_ReadPin(NOT_RST_4_GPIO_Port, NOT_RST_4_Pin) )
+			&& HAL_GPIO_ReadPin(NOT_FAULT_3_GPIO_Port, NOT_FAULT_3_Pin) && HAL_GPIO_ReadPin(NOT_FAULT_4_GPIO_Port, NOT_FAULT_4_Pin) )
 		return 0; // if all pins is 1 then all is ready, there is not faults then return 0
 
 	return 1;
@@ -1708,8 +1714,8 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
 		if(Gv<2) //CZARY
 		{
 			delay_tr = acos(1-Gv)/wr;
-			imin = output_voltage*sqrt((2-Gv)/Gv)/Z; //[mA] Negative current needed to Zero voltage switching in resonance
-
+			imin = (int)(Imin_Factor*output_voltage*sqrt((2-Gv)/Gv)/Z); //[mA] Negative current needed to Zero voltage switching in resonance
+			if(imin<500) imin = 500;
 		} else if(Gv>=2)
 		{
 			delay_tr = (M_PI-acos(1/(Gv-1)))/wr;
@@ -1737,7 +1743,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
 		// imax1,2 each for branches to make 180 degree shift
 		HAL_DAC_SetValue(&hdac1, DAC_CHANNEL_1, DAC_ALIGN_12B_R, current_sensor1_vref+((int)imax1*0.025)); // imax1  1.5V is 0A;  1A is 20mV; 1 bit is 0.8mV; imax[mA]*0.02 [V/A]/0.8[mV] = Value for DAC
 		HAL_DAC_SetValue(&hdac1, DAC_CHANNEL_2, DAC_ALIGN_12B_R, current_sensor2_vref+((int)imax2*0.025)); // imax2
-		HAL_DAC_SetValue(&hdac2, DAC_CHANNEL_1, DAC_ALIGN_12B_R, current_sensor1_vref+((int)imin*0.25)); // imin uzyto tutaj wzmacniacza 10x dla sygnalu z sensora pradu wiec ma wzmocnienie 200mv/A a nie 20mv/a
+		HAL_DAC_SetValue(&hdac2, DAC_CHANNEL_1, DAC_ALIGN_12B_R, current_sensor1_vref-((int)imin*0.25)); // imin uzyto tutaj wzmacniacza 10x dla sygnalu z sensora pradu wiec ma wzmocnienie 200mv/A a nie 20mv/a
 
 		}
 		//HAL_TIM_Base_Stop_IT(&htim15);
