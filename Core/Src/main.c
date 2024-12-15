@@ -309,17 +309,16 @@ int main(void)
 	  	  	  	  }
 
 	  	  	  	  uint8_t interlock = HAL_GPIO_ReadPin(INTERLOCK_GPIO_Port, INTERLOCK_Pin);
-	  	          if (interlock &&  start_program && !(Check_Faults())   && Check_Ready()/* start_program condition */) {
+	  	          if (interlock &&  start_program && !(Check_Faults())   && Check_Ready()/* start_program condition */ && !once) {
 	  	        	//USB_SendString("State: EVENT start_program \r\n");
 	  	              event = EVENT_START;
-	  	          } else if (/*HAL_GPIO_ReadPin(INTERLOCK_GPIO_Port, INTERLOCK_Pin)*/Check_Faults() /* fault condition */) {
-	  	              event = EVENT_FAULT;
 	  	          } else if (clear_fault) {
 	  	        	  /* clear fault condition */
 	  	              event = EVENT_CLEAR_FAULT;
-	  	          } else if (0/* shutdown condition */) {
-	  	              event = EVENT_SHUTDOWN;
 	  	          }
+	  	         if (!interlock || Check_Faults() /* fault condition */) {
+	  	       	  	              event = EVENT_FAULT;
+	  	         }
 
 	  	          // Handle the event and update the state
 	  	          currentState = handle_event(currentState, event);
@@ -381,7 +380,9 @@ int main(void)
 	  	              case STATE_STANDBY:
 	  	                  // Wait for start_program signal
 	  	              {
-	  	            	  if(start_program && /*HAL_GPIO_ReadPin(INTERLOCK_GPIO_Port, INTERLOCK_Pin)*/   !(Check_Faults())   && Check_Ready()){
+	  	            	//HAL_GPIO_WritePin(RESET_FPGA_GPIO_Port, RESET_FPGA_Pin, 0); // RESET =  0  = reset turn off
+	  	            	//HAL_GPIO_WritePin(START_STOP_FPGA_GPIO_Port, START_STOP_FPGA_Pin, 1); // START FPGA DANCE
+	  	            	  if(start_program && interlock &&  !(Check_Faults())   && Check_Ready()){
 	  	            		  currentState = STATE_SOFT_START;
 	  	            	  }
 
@@ -395,9 +396,10 @@ int main(void)
 	  	            	HAL_GPIO_WritePin(RESET_FPGA_GPIO_Port, RESET_FPGA_Pin, 0); // RESET =  0  = reset turn off
 	  	            	HAL_GPIO_WritePin(START_STOP_FPGA_GPIO_Port, START_STOP_FPGA_Pin, 1); // START FPGA DANCE
 	  	            	HAL_TIM_Base_Start_IT(&htim15); // START TIM15 THATS IS MAIN CONTROL LOOP
+	  	            	once = 1;
 	  	            	  }
 
-	  	            	if(once==0) once = 1;
+
 	  	              }
 	  	                  break;
 	  	              case STATE_REGULATION:
@@ -1521,6 +1523,7 @@ ConverterState handle_event(ConverterState currentState, ConverterEvent event) {
         case STATE_SOFT_START:
             if (event == EVENT_FAULT)
             {
+            	currentState = STATE_FAULT;
                 return STATE_FAULT;
             } else if (RAMP_FINISHED) {
                 return STATE_REGULATION;
@@ -1528,8 +1531,8 @@ ConverterState handle_event(ConverterState currentState, ConverterEvent event) {
             break;
         case STATE_REGULATION:
         	//USB_SendString("State: INIT -> RUNNING\r\n");
-            if (event == EVENT_FAULT)
-            {
+            if (event == EVENT_FAULT){
+            	currentState = STATE_FAULT;
                 return STATE_FAULT;
             } else if (event == EVENT_SHUTDOWN)
             {
