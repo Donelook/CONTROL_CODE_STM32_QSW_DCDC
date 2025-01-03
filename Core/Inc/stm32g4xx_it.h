@@ -63,7 +63,6 @@ void DMA1_Channel5_IRQHandler(void);
 void USB_LP_IRQHandler(void);
 void TIM1_BRK_TIM15_IRQHandler(void);
 void TIM6_DAC_IRQHandler(void);
-void CORDIC_IRQHandler(void);
 /* USER CODE BEGIN EFP */
 
 /* USER CODE END EFP */

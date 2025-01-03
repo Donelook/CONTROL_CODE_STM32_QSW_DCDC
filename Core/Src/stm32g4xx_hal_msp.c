@@ -404,9 +404,6 @@ void HAL_CORDIC_MspInit(CORDIC_HandleTypeDef* hcordic)
   /* USER CODE END CORDIC_MspInit 0 */
     /* Peripheral clock enable */
     __HAL_RCC_CORDIC_CLK_ENABLE();
-    /* CORDIC interrupt Init */
-    HAL_NVIC_SetPriority(CORDIC_IRQn, 0, 0);
-    HAL_NVIC_EnableIRQ(CORDIC_IRQn);
   /* USER CODE BEGIN CORDIC_MspInit 1 */
 
   /* USER CODE END CORDIC_MspInit 1 */
@@ -430,9 +427,6 @@ void HAL_CORDIC_MspDeInit(CORDIC_HandleTypeDef* hcordic)
   /* USER CODE END CORDIC_MspDeInit 0 */
     /* Peripheral clock disable */
     __HAL_RCC_CORDIC_CLK_DISABLE();
-
-    /* CORDIC interrupt DeInit */
-    HAL_NVIC_DisableIRQ(CORDIC_IRQn);
   /* USER CODE BEGIN CORDIC_MspDeInit 1 */
 
   /* USER CODE END CORDIC_MspDeInit 1 */

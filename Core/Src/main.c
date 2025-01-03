@@ -235,7 +235,7 @@ uint8_t checkfaults = 0;
 uint8_t checkreads = 0;
 
 float Imin_Factor = 2;
-
+int once = 0;
 /* USER CODE END 0 */
 
 /**
@@ -246,7 +246,7 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-	int once = 0;
+
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -394,9 +394,10 @@ int main(void)
 	  	            	  if(once == 0){
 	  	            	  //Start timer that start_program ramp and pi regulation
 	  	            	HAL_GPIO_WritePin(RESET_FPGA_GPIO_Port, RESET_FPGA_Pin, 0); // RESET =  0  = reset turn off
-	  	            	HAL_GPIO_WritePin(START_STOP_FPGA_GPIO_Port, START_STOP_FPGA_Pin, 1); // START FPGA DANCE
+	  	            	//HAL_GPIO_WritePin(START_STOP_FPGA_GPIO_Port, START_STOP_FPGA_Pin, 1); // START FPGA DANCE
 	  	            	HAL_TIM_Base_Start_IT(&htim15); // START TIM15 THATS IS MAIN CONTROL LOOP
-	  	            	once = 1;
+	  	            	//HAL_GPIO_WritePin(START_STOP_FPGA_GPIO_Port, START_STOP_FPGA_Pin, 1); // START FPGA DANCE
+	  	            	//once = 1;
 	  	            	  }
 
 
@@ -1750,6 +1751,11 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
 
 		}
 		//HAL_TIM_Base_Stop_IT(&htim15);
+		if(once == 0){
+		//	HAL_Delay(10);
+		HAL_GPIO_WritePin(START_STOP_FPGA_GPIO_Port, START_STOP_FPGA_Pin, 1); // START FPGA DANCE
+		once = 1;
+		}
 	}
 
 	if (htim->Instance == TIM6) // 5 sec period
