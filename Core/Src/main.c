@@ -44,7 +44,7 @@ typedef enum {
     EVENT_START,
     EVENT_FAULT,
     EVENT_CLEAR_FAULT,
-    EVENT_SHUTDOWN
+    EVENT_SHUTDOWN,
 } ConverterEvent;
 
 /* USER CODE END PTD */
@@ -204,7 +204,7 @@ float Low_pass_filter(float new_sample, float old_sample);
 uint32_t imax2_sum = 0;
 volatile static uint16_t adc5_dma_buffer[MA_WINDOW_SIZE];
 volatile static uint16_t adc5_measurments[MA_WINDOW_SIZE];
-uint16_t adc_moving_average;
+uint16_t adc_moving_average = 0;
 
 // USB INTERFACE DISPLAY AND SET
 // Buffer to hold incoming data
@@ -217,25 +217,29 @@ volatile uint8_t dataReceivedFlag = 0; // Flags to indicate new data received
 
 
 //Regulator PI of voltage
-float Kp = 0.3; 			// Proportional part of PI
-float Ti = 0.0005; 			// Integral part of PI
-uint32_t LIM_PEAK_POS = 5000; 	// Positive limit for PI regulator [mA]
-uint32_t LIM_PEAK_NEG = 0; 	// Negative limit for PI regulator [mA]
+float Kp = 0.001; 			// Proportional part of PI
+float Ti = 0.0000005; 			// Integral part of PI
+uint32_t LIM_PEAK_POS = 4000; 	// Positive limit for PI regulator [mA]
+uint32_t LIM_PEAK_NEG = 1000; 	// Negative limit for PI regulator [mA]
 uint32_t Integral_I = 0;		// Integral part of PI
 uint32_t prev_delta = 0; 		// buffer  error n-1
 
 uint8_t start_program = 0;
+uint8_t stop_program = 0;
 uint8_t clear_fault = 0;
 ConverterEvent event = EVENT_SHUTDOWN;
 ConverterState currentState = STATE_INIT;
 
-int duty_cycle = 20;
+int duty_cycle = 20; // start duty cycle for FAN speed
 
 uint8_t checkfaults = 0;
 uint8_t checkreads = 0;
 
-float Imin_Factor = 2;
+float Imin_Factor = 1;
 int once = 0;
+uint8_t interlock = 0;
+uint32_t sythick1 = 0;
+uint32_t sythick2 = 0;
 /* USER CODE END 0 */
 
 /**
@@ -298,8 +302,8 @@ int main(void)
   while (1)
   {
 
-	  checkfaults = Check_Faults();
-	  checkreads = Check_Ready();
+	  	  	  	  checkfaults = Check_Faults();
+
 	  	  	  	  if (dataReceivedFlag) {
 	  	  	  	      // Process the data
 	  	  	  	      ParseUSBCommand();  // Function to handle the received command
@@ -308,17 +312,25 @@ int main(void)
 	  	  	  	      dataReceivedFlag = 0;
 	  	  	  	  }
 
-	  	  	  	  uint8_t interlock = HAL_GPIO_ReadPin(INTERLOCK_GPIO_Port, INTERLOCK_Pin);
-	  	          if (interlock &&  start_program && !(Check_Faults())   && Check_Ready()/* start_program condition */ && !once) {
+	  	  	  	  interlock = HAL_GPIO_ReadPin(INTERLOCK_GPIO_Port, INTERLOCK_Pin);
+
+	  	          if (interlock &&  start_program && !(Check_Faults())) {
 	  	        	//USB_SendString("State: EVENT start_program \r\n");
 	  	              event = EVENT_START;
-	  	          } else if (clear_fault) {
+	  	              start_program = 0;
+	  	          }else if (interlock &&  stop_program && !(Check_Faults())) {
+		  	        	//USB_SendString("State: EVENT start_program \r\n");
+		  	              event = EVENT_SHUTDOWN;
+		  	          }
+	  	          else if (clear_fault) {
 	  	        	  /* clear fault condition */
 	  	              event = EVENT_CLEAR_FAULT;
 	  	          }
-	  	         if (!interlock || Check_Faults() /* fault condition */) {
-	  	       	  	              event = EVENT_FAULT;
-	  	         }
+
+	  	         if (!interlock || Check_Faults() /* fault condition */)
+	  	       	 {
+	  	       	  	event = EVENT_FAULT;
+	  	       	 }
 
 	  	          // Handle the event and update the state
 	  	          currentState = handle_event(currentState, event);
@@ -382,6 +394,7 @@ int main(void)
 	  	              {
 	  	            	//HAL_GPIO_WritePin(RESET_FPGA_GPIO_Port, RESET_FPGA_Pin, 0); // RESET =  0  = reset turn off
 	  	            	//HAL_GPIO_WritePin(START_STOP_FPGA_GPIO_Port, START_STOP_FPGA_Pin, 1); // START FPGA DANCE
+	  	            	checkreads = Check_Ready();
 	  	            	  if(start_program && interlock &&  !(Check_Faults())   && Check_Ready()){
 	  	            		  currentState = STATE_SOFT_START;
 	  	            	  }
@@ -415,9 +428,11 @@ int main(void)
 	  	                  // Handle fault condition
 	  	            	  // Turn off all gate drivers and stop FPGA
 	  	              {
-	  	            	HAL_GPIO_WritePin(RESET_FPGA_GPIO_Port, RESET_FPGA_Pin, 1); // RESET =  1  = reset turn on IMPORTANT!! WAZNE!!!
+	  	            	HAL_GPIO_WritePin(START_STOP_FPGA_GPIO_Port, START_STOP_FPGA_Pin, GPIO_PIN_RESET); // STOP drives mosfet etc
 
-	  	            	HAL_GPIO_WritePin(START_STOP_FPGA_GPIO_Port, START_STOP_FPGA_Pin, GPIO_PIN_RESET);
+	  	            	//HAL_GPIO_WritePin(RESET_FPGA_GPIO_Port, RESET_FPGA_Pin, 1); // RESET =  1  = reset turn on IMPORTANT!! WAZNE!!!
+
+
 	  	            	HAL_TIM_Base_Stop_IT(&htim15);
 
 	  	            	HAL_GPIO_WritePin(NOT_RST_1_GPIO_Port,NOT_RST_1_Pin, GPIO_PIN_RESET);
@@ -433,7 +448,7 @@ int main(void)
 	  	            	HAL_TIM_Base_Start(&htim7); // timer for reset OCD and INTERLOCK reset turn off
 
 
-
+	  	            	once = 0;
 	  	            	start_program = 0;
 	  	            	currentState = STATE_STANDBY;
 	  	              }
@@ -441,7 +456,9 @@ int main(void)
 	  	              case STATE_SHUTDOWN:
 	  	                  // Safely shut down the converter
 	  	              {
-	  	            	//HAL_TIM_Base_Stop_IT(&htim15);
+	  	            	HAL_GPIO_WritePin(START_STOP_FPGA_GPIO_Port, START_STOP_FPGA_Pin, GPIO_PIN_RESET);
+	  	            	HAL_GPIO_WritePin(RESET_FPGA_GPIO_Port, RESET_FPGA_Pin, 1); // RESET =  1  = reset turn on IMPORTANT!! WAZNE!!!
+	  	            	HAL_TIM_Base_Stop_IT(&htim15);
 	  	              }
 
 	  	                  break;
@@ -1512,45 +1529,67 @@ ConverterState handle_event(ConverterState currentState, ConverterEvent event) {
         case STATE_INIT:
             if (event == EVENT_START)
             {
+            	currentState = STATE_SOFT_START;
                 return STATE_SOFT_START;
             }
             break;
+
         case STATE_STANDBY:
             if (event == EVENT_START)
             {
+            	currentState = STATE_SOFT_START;
                 return STATE_SOFT_START;
             }
             break;
+
         case STATE_SOFT_START:
             if (event == EVENT_FAULT)
             {
             	currentState = STATE_FAULT;
                 return STATE_FAULT;
-            } else if (RAMP_FINISHED) {
-                return STATE_REGULATION;
-            }
-            break;
-        case STATE_REGULATION:
-        	//USB_SendString("State: INIT -> RUNNING\r\n");
-            if (event == EVENT_FAULT){
-            	currentState = STATE_FAULT;
-                return STATE_FAULT;
-            } else if (event == EVENT_SHUTDOWN)
+
+            } else if (RAMP_FINISHED)
             {
+            	//RAMP_FINISHED = 0;
+            	currentState = STATE_REGULATION;
+                return STATE_REGULATION;
+            }else if (event == EVENT_SHUTDOWN)
+            {
+            	currentState = STATE_SHUTDOWN;
                 return STATE_SHUTDOWN;
             }
 
             break;
+
+        case STATE_REGULATION:
+        	//USB_SendString("State: INIT -> RUNNING\r\n");
+            if (event == EVENT_FAULT)
+            {
+            	currentState = STATE_FAULT;
+                return STATE_FAULT;
+
+            } else if (event == EVENT_SHUTDOWN)
+            {
+            	currentState = STATE_SHUTDOWN;
+                return STATE_SHUTDOWN;
+            }
+
+            break;
+
         case STATE_FAULT:
             if (event == EVENT_CLEAR_FAULT)
             {
+            	currentState = STATE_STANDBY;
                 return STATE_STANDBY;
             }
             break;
+
         case STATE_SHUTDOWN:
-            if (1)
+            if (event == EVENT_START)
             {
-                return STATE_STANDBY;
+            	once = 0;
+            	currentState = STATE_SOFT_START;
+                return STATE_SOFT_START;
             }
             break;
         default:
@@ -1597,6 +1636,7 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 		            sum += adc5_dma_buffer[i];
 		        }
 		        adc_moving_average = ((sum / MA_WINDOW_SIZE)*3300)/4096;
+		        imax2_sum=(adc_moving_average-1450)*0.384;
 
 		       // adc5_data_ready = 1; // Set flag to indicate new data is ready
 
@@ -1704,6 +1744,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
 	//  Ts 20khz
 	if(htim->Instance == TIM15)
 	{
+		sythick1 =  HAL_GetTick();
 		if(currentState == STATE_SOFT_START || currentState == STATE_REGULATION )
 		{
 		//current_sensor1_vref = adc3_dma_buffer[0]*3300/4096;//(Low_pass_filter(adc3_dma_buffer[0], pcb_temp)/4096)*3.3;
@@ -1712,35 +1753,35 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
 		input_voltage = (int)((((adc3_dma_buffer[2])*3300)/4096-200)*18.81);//[mV]		((Low_pass_filter(adc3_dma_buffer[2], input_voltage)/4096)*3.3-0.2)*27.1;
 		output_voltage = (int)((((adc4_dma_buffer[1])*3300)/4096-200)*18.81);//[mV] 		((Low_pass_filter(adc4_dma_buffer, output_voltage)/4096)*3.3-0.2)*27.1;
 
-		imax2_sum = (adc_moving_average-1450)*0.384; //[mA] 0.20V - -0.5A || 1.45v - 0A || 2.77V - 0.5A		0.384 A/V
+		//imax2_sum = //(adc_moving_average-1450)*0.384; //[mA] 0.20V - -0.5A || 1.45v - 0A || 2.77V - 0.5A		0.384 A/V
 		Gv = (float)output_voltage/(float)input_voltage;//output_voltage/input_voltage;
 
 		if(Gv<2) //CZARY
 		{
 			delay_tr = acos(1-Gv)/wr;
 			imin = (int)(Imin_Factor*output_voltage*sqrt((2-Gv)/Gv)/Z); //[mA] Negative current needed to Zero voltage switching in resonance
-			if(imin<500) imin = 500;
+			if(imin>500) imin = 500;
 		} else if(Gv>=2)
 		{
 			delay_tr = (M_PI-acos(1/(Gv-1)))/wr;
 			imin = 0;
 		}
-		if(delay_tr<0.01){
+		if(delay_tr<0.001){
 		int delay_tr_freq = (int)(1/delay_tr);
 		if(delay_tr_freq>20000000) delay_tr_freq = 15000000;//10Mhz
-		Update_PWM_Frequency(&htim1, TIM_CHANNEL_1, delay_tr_freq); // Set TIM1 CH1 to freq that is delay tr and send to fpga
+		if(once == 0) Update_PWM_Frequency(&htim1, TIM_CHANNEL_1, 221454); // Set TIM1 CH1 to freq that is delay tr and send to fpga
 		}
 
 		if(currentState == STATE_SOFT_START) RAMP(); // Adding to Vramp stepping voltage to create starting ramp
 
 		regulatorPI(&imax1, &Integral_I, output_voltage, Vramp, LIM_PEAK_POS, LIM_PEAK_NEG, Kp, Ti, Ts);
 
-		if(output_voltage>19000)
+		if(output_voltage>40000)
 		{
 		delay_hc = (2*C_CAP*output_voltage)/imax1;
 		int delay_hc_freq = (int)(1/delay_hc);
 		if(delay_hc_freq>20000000) delay_hc_freq = 15000000;//10Mhz jakis problem
-		Update_PWM_Frequency(&htim8, TIM_CHANNEL_2, delay_hc_freq); // Set TIM8 CH1 o freq that is delay hc and send to fpga
+		if(once == 0) Update_PWM_Frequency(&htim8, TIM_CHANNEL_2, 7100000); // Set TIM8 CH1 o freq that is delay hc and send to fpga
 		}
 
 		imax2 = imax1 + imax2_sum; // imax2_sum signal from FPGA
@@ -1756,6 +1797,9 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
 		HAL_GPIO_WritePin(START_STOP_FPGA_GPIO_Port, START_STOP_FPGA_Pin, 1); // START FPGA DANCE
 		once = 1;
 		}
+
+		sythick2 =  HAL_GetTick() - sythick1;
+
 	}
 
 	if (htim->Instance == TIM6) // 5 sec period
@@ -1793,10 +1837,11 @@ void RAMP()
 				{
 					Vramp = output_voltage-4000000*Ts;
 				}
-				else if(Vramp==48000)
+				if(Vramp>=48000)
 				{
 					Vramp = 48000; // 48V
 					RAMP_FINISHED = 1;
+					currentState = STATE_REGULATION;
 				}
 
 
