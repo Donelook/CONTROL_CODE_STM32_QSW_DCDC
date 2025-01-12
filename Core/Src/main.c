@@ -58,6 +58,7 @@ typedef enum {
 #define wr 69536414				//	1/sqrt(L_IND*C_CAP)	- Omega of LC resonance
 #define Z 146.128				//sqrt(L_IND/(2*C_CAP)) // impedance of inductor and two capacitor on Dren-Source MOSFETs
 #define Ts 0.00005				// Sampling rate of control loop 20khz
+#define ALPHA 0.8 // smoothing factor 0-1
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -185,7 +186,6 @@ float a_z[N+1] = { 1.0000,   2.3695,   2.3140,   1.0547,   0.1874 };
 void  BUTTERWORHT_FILTER(float new_sample);*/
 
 //Simple low pass filter
-#define ALPHA 0.4 // smoothing factor 0-1
 float Low_pass_filter(float new_sample, float old_sample);
 
 
@@ -324,6 +324,7 @@ int main(void)
 	  	          }else if (interlock &&  stop_program && !(checkfaults)) {
 		  	        	//USB_SendString("State: EVENT start_program \r\n");
 		  	              event = EVENT_SHUTDOWN;
+		  	              stop_program = 0;
 		  	          }
 	  	          else if (clear_fault) {
 	  	        	  /* clear fault condition */
@@ -455,7 +456,7 @@ int main(void)
 
 	  	                				imax2 = imax1 + imax2_sum;
 	  	                				if(once == 0){
-	  	                						//	HAL_Delay(10);
+	  	                							HAL_Delay(100);
 	  	                						HAL_GPIO_WritePin(START_STOP_FPGA_GPIO_Port, START_STOP_FPGA_Pin, 1); // START FPGA DANCE
 	  	                						once = 1;
 	  	                						}
@@ -500,6 +501,7 @@ int main(void)
 	  	            	HAL_GPIO_WritePin(START_STOP_FPGA_GPIO_Port, START_STOP_FPGA_Pin, GPIO_PIN_RESET);
 	  	            	HAL_GPIO_WritePin(RESET_FPGA_GPIO_Port, RESET_FPGA_Pin, 1); // RESET =  1  = reset turn on IMPORTANT!! WAZNE!!!
 	  	            	HAL_TIM_Base_Stop_IT(&htim15);
+	  	            	HAL_GPIO_WritePin(RESET_FPGA_GPIO_Port, RESET_FPGA_Pin, 0); // RESET =  1  = reset turn on IMPORTANT!! WAZNE!!!
 	  	            	RAMP_FINISHED, once = 0;
 	  	            	imax1, imax2,vout, Vramp, delay_tr, delay_hc, Gv, Integral_I, prev_delta, input_vol, output_vol = 1;
 
@@ -1860,10 +1862,10 @@ void RAMP()
 					Vramp = output_voltage+4000000*Ts; // 200mV step per loop period
 					//RAMP_FINISHED = 0;
 				}
-				else if((vref-output_voltage)<-100)
-				{
-					Vramp = output_voltage-4000000*Ts;
-				}
+				//else if((vref-output_voltage)<-100)
+				//{
+				//	Vramp = output_voltage-4000000*Ts;
+				//}
 				if(Vramp>=48000)
 				{
 					Vramp = 48000; // 48V
