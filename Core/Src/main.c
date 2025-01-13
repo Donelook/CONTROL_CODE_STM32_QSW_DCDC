@@ -186,7 +186,7 @@ float a_z[N+1] = { 1.0000,   2.3695,   2.3140,   1.0547,   0.1874 };
 void  BUTTERWORHT_FILTER(float new_sample);*/
 
 //Simple low pass filter
-float Low_pass_filter(float new_sample, float old_sample);
+float Low_pass_filter(float new_sample, float old_sample, float old_sample_n1, float old_passed);
 
 
 /* ADC4_MEASRUMENTS[X]
@@ -242,6 +242,11 @@ uint32_t sythick2 = 0;
 uint8_t flag_control = 0;
 uint32_t input_vol = 1;
 uint32_t output_vol = 1;
+uint32_t input_vol_x_n1 = 1;
+uint32_t input_vol_y_n1 = 1;
+uint32_t output_vol_x_n1 = 1;
+uint32_t output_vol_y_n1 = 1;
+
 
 /* USER CODE END 0 */
 
@@ -422,9 +427,15 @@ int main(void)
 	  	                  {
 	  	                	  if(flag_control)
 	  	                	  {
-	  	                		  	  	input_vol = Low_pass_filter(input_voltage, input_vol);
-	  	                		  	  	output_vol = Low_pass_filter(output_voltage, output_vol);
-	  	                		Gv = (float)output_vol/(float)input_vol;//output_voltage/input_voltage;
+
+	  	                		  	  	input_vol = Low_pass_filter(input_voltage, input_vol, input_vol_x_n1, input_vol_y_n1);
+	  	                		  	  	output_vol = Low_pass_filter(output_voltage, output_vol, output_vol_x_n1, output_vol_y_n1);
+	  	                		  	  	input_vol_x_n1 = input_voltage;
+	  	                		  	  	input_vol_y_n1 = input_vol;
+	  	                		  	  	output_vol_x_n1 = output_voltage;
+	  	                		  	  	output_vol_y_n1 = output_vol;
+
+	  	                		  	  	Gv = (float)output_vol/(float)input_vol;//output_voltage/input_voltage;
 
 	  	                				if(Gv<2) //CZARY
 	  	                				{
@@ -1880,10 +1891,11 @@ void regulatorPI(uint32_t *out, uint32_t *integral, float in, float in_zad, floa
 {
 	// Tustin transfrom of PI regulator s -> 2/T * (Z-1)/(Z+1)
     float delta;
-
+    uint32_t prev_out;
     delta = in_zad - in; // error
     *integral = *integral + (delta + prev_delta) * (kp / ti) * Ts1 * 0.5 ; // I part
     prev_delta = delta;
+    prev_out = *out;
     if (*integral >= limp) // limit peak positive
     {
         *integral = limp;
@@ -1900,6 +1912,10 @@ void regulatorPI(uint32_t *out, uint32_t *integral, float in, float in_zad, floa
     if (*out <= limn)// limit peak negative
     {
         *out = limn;
+    }
+    if((*out - prev_out) < 50 || (*out - prev_out) > -50) // histeresis to probably prevent jitter
+    {
+    	*out = prev_out;
     }
 }
 
@@ -1930,11 +1946,12 @@ void regulatorPI(uint32_t *out, uint32_t *integral, float in, float in_zad, floa
 	    return y[0];
 }*/
 
-float Low_pass_filter(float new_sample, float old_sample)
+float Low_pass_filter(float new_sample, float old_sample, float old_sample_n1, float old_passed)
 {
 	float Low_passed_sample = 0;
-	Low_passed_sample = (float)ALPHA * new_sample + (1.0 - ALPHA) * old_sample;
+	//Low_passed_sample = (float)ALPHA * new_sample + (1.0 - ALPHA) * old_sample;
 
+	Low_passed_sample = (1-ALPHA)*0.5*(new_sample+old_sample_n1+ALPHA*old_passed);//(float)ALPHA * new_sample + (1.0 - ALPHA) * old_sample;
 	return Low_passed_sample;
 
 }
