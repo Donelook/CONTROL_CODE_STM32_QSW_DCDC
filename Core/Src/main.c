@@ -247,6 +247,23 @@ uint32_t input_vol_y_n1 = 1;
 uint32_t output_vol_x_n1 = 1;
 uint32_t output_vol_y_n1 = 1;
 
+// CORDIC
+int32_t float_to_integer(float in, int scaling_factor, uint8_t bits);
+float integer_to_float(int32_t result_cordic_integer, int squarted_scaling_factor, int8_t mode, uint8_t bits);
+
+CORDIC_HandleTypeDef hcordic;        // CORDIC handle (assume it's declared globally or in main)
+CORDIC_ConfigTypeDef sCordicConfig;  // config structure
+int32_t result_q31;
+int16_t result_q16;
+int32_t value_cordic = 1073741824;
+
+int32_t start_ticks = 0;
+int32_t stop_ticks = 0;
+int32_t elapsed_ticks = 0;
+float resultcordic;
+float obl;
+int32_t beforea;
+float resultcordic_float;
 
 /* USER CODE END 0 */
 
@@ -298,7 +315,32 @@ int main(void)
   MX_CORDIC_Init();
   /* USER CODE BEGIN 2 */
 
+  sCordicConfig.Function   = CORDIC_FUNCTION_SQUAREROOT;       /* Compute sine (and cosine) */
+  sCordicConfig.Precision  = CORDIC_PRECISION_2CYCLES;    /* Maximum precision (24 iterations) */
+  sCordicConfig.Scale      = CORDIC_SCALE_0;              /* No additional scaling */
+  sCordicConfig.NbWrite    = CORDIC_NBWRITE_1;            /* One input (angle); implicit modulus = 1 */
+  sCordicConfig.NbRead     = CORDIC_NBREAD_1;             /* Two outputs (sine and cosine) */
+  sCordicConfig.InSize     = CORDIC_INSIZE_32BITS;        /* 32-bit input (Q1.31 format) */
+  sCordicConfig.OutSize    = CORDIC_OUTSIZE_32BITS;       /* 32-bit output (Q1.31 format) */
+  Gv = 2;
+  obl = (((2-Gv)/Gv)/Z);
+  // GV from  0.8 to 1.99
+  //
+  if (HAL_CORDIC_Configure(&hcordic, &sCordicConfig) != HAL_OK)
+    {
+      /* Configuration Error */
+      Error_Handler();
+    }
+  	  start_ticks = SysTick->VAL;
 
+  	  beforea = float_to_integer(obl, 100, 32);
+  	  HAL_CORDIC_Calculate(&hcordic, &beforea, &result_q31, 1, 100);//sqrt((2-Gv)/Gv)/Z)
+  	 // resultcordic = sqrt(obl);
+  	  resultcordic = integer_to_float(result_q31, 10, 1, 32);
+
+  	  stop_ticks = SysTick->VAL;
+
+  	  elapsed_ticks = start_ticks-stop_ticks;
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -309,6 +351,7 @@ int main(void)
 
   while (1)
   {
+
 
 	  	  	  	  checkfaults = Check_Faults();
 
@@ -1078,13 +1121,14 @@ static void MX_TIM1_Init(void)
   sConfigOC.Pulse = 0;
   sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
   sConfigOC.OCNPolarity = TIM_OCNPOLARITY_HIGH;
-  sConfigOC.OCFastMode = TIM_OCFAST_ENABLE;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
   sConfigOC.OCIdleState = TIM_OCIDLESTATE_RESET;
   sConfigOC.OCNIdleState = TIM_OCNIDLESTATE_RESET;
   if (HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
   {
     Error_Handler();
   }
+  __HAL_TIM_DISABLE_OCxPRELOAD(&htim1, TIM_CHANNEL_1);
   sBreakDeadTimeConfig.OffStateRunMode = TIM_OSSR_DISABLE;
   sBreakDeadTimeConfig.OffStateIDLEMode = TIM_OSSI_DISABLE;
   sBreakDeadTimeConfig.LockLevel = TIM_LOCKLEVEL_OFF;
@@ -1285,13 +1329,14 @@ static void MX_TIM8_Init(void)
   sConfigOC.Pulse = 0;
   sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
   sConfigOC.OCNPolarity = TIM_OCNPOLARITY_HIGH;
-  sConfigOC.OCFastMode = TIM_OCFAST_ENABLE;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
   sConfigOC.OCIdleState = TIM_OCIDLESTATE_RESET;
   sConfigOC.OCNIdleState = TIM_OCNIDLESTATE_RESET;
   if (HAL_TIM_PWM_ConfigChannel(&htim8, &sConfigOC, TIM_CHANNEL_2) != HAL_OK)
   {
     Error_Handler();
   }
+  __HAL_TIM_DISABLE_OCxPRELOAD(&htim8, TIM_CHANNEL_2);
   sBreakDeadTimeConfig.OffStateRunMode = TIM_OSSR_DISABLE;
   sBreakDeadTimeConfig.OffStateIDLEMode = TIM_OSSI_DISABLE;
   sBreakDeadTimeConfig.LockLevel = TIM_LOCKLEVEL_OFF;
@@ -2113,6 +2158,62 @@ void ParseUSBCommand(void) {
 	        memset(USB_RX_Buffer, 0, sizeof(USB_RX_Buffer));  // Clear buffer
 	        dataReceivedFlag = 0;
 	    }
+}
+
+// CORDIC
+int32_t float_to_integer(float in, int scaling_factor, uint8_t bits){
+
+	int32_t acc;
+	if(bits == 32){
+	if(in <= 1){
+		 acc = (uint32_t)(in*scaling_factor*2147483648);
+	}
+
+	if(in > 1){
+		 acc = (uint32_t)((in/scaling_factor)*2147483648);
+		}
+}
+	if(bits == 16){
+		if(in <= 1){
+			 acc = (uint32_t)(in*scaling_factor*32767);
+		}
+
+		if(in > 1){
+			 acc = (uint32_t)((in/scaling_factor)*32767);
+			}
+	}
+
+
+	return acc;
+}
+
+float integer_to_float(int32_t result_cordic_integer, int squarted_scaling_factor, int8_t mode, uint8_t bits){
+	float acc;
+
+	if(bits == 32){
+		// mode = 1 when float_to_integer() in is  <= 1
+		if(mode){
+			acc = (float)((result_cordic_integer/2147483648.0f)/squarted_scaling_factor);
+		}
+		// mode = 0 when float_to_integer() in is > 1
+		if(!mode){
+			acc = (float)((result_cordic_integer/2147483648.0f)*squarted_scaling_factor);
+		}
+	}
+
+	if(bits == 16){
+		// mode = 1 when float_to_integer() in is  <= 1
+		if(mode){
+			acc = (float)((result_cordic_integer/32767.0f)/squarted_scaling_factor);
+		}
+		// mode = 0 when float_to_integer() in is > 1
+		if(!mode){
+			acc = (float)((result_cordic_integer/32767.0f)*squarted_scaling_factor);
+		}
+	}
+
+	return acc;
+
 }
 
 void DisplayAllVariables(void) {
