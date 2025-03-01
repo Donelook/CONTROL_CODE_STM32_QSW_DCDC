@@ -56,9 +56,82 @@ typedef enum {
 #define L_IND 0.0000000022  	// 94uH
 #define C_CAP 0.0000000022 		// 2.2nF
 #define wr 69536414				//	1/sqrt(L_IND*C_CAP)	- Omega of LC resonance
+#define INV_wr 1.43e-8			//	1/wr
 #define Z 146.128				//sqrt(L_IND/(2*C_CAP)) // impedance of inductor and two capacitor on Dren-Source MOSFETs
+#define INV_Z 0.0069867531		// 1/Z
 #define Ts 0.00005				// Sampling rate of control loop 20khz
 #define ALPHA 0.3 // smoothing factor 0-1
+
+#define LUT_SIZE 256
+
+// Precomputed lookup table for acos(x) for x in [0, 1] (in radians).
+// Generated with: for (i=0;i<256;i++){ x = i/255.0; table[i] = acos(x); }
+static const float acos_lut[LUT_SIZE] = {
+     1.57079633, 1.56466040, 1.55852448, 1.55238856 ,
+     1.54625263, 1.54011671, 1.53398079, 1.52784486 ,
+     1.52170894, 1.51557302, 1.50943710, 1.50330117 ,
+     1.49716525, 1.49102933, 1.48489340, 1.47875748 ,
+     1.47262156, 1.46648563, 1.46034971, 1.45421379 ,
+     1.44807786, 1.44194194, 1.43580602, 1.42967009 ,
+     1.42353417, 1.41739825, 1.41126232, 1.40512640 ,
+     1.39899048, 1.39285456, 1.38671863, 1.38058271 ,
+     1.37444679, 1.36831086, 1.36217494, 1.35603902 ,
+     1.34990309, 1.34376717, 1.33763125, 1.33149532 ,
+     1.32535940, 1.31922348, 1.31308755, 1.30695163 ,
+     1.30081571, 1.29467978, 1.28854386, 1.28240794 ,
+     1.27627202, 1.27013609, 1.26400017, 1.25786425 ,
+     1.25172832, 1.24559240, 1.23945648, 1.23332055 ,
+     1.22718463, 1.22104871, 1.21491278, 1.20877686 ,
+     1.20264094, 1.19650501, 1.19036909, 1.18423317 ,
+     1.17809725, 1.17196132, 1.16582540, 1.15968948 ,
+     1.15355355, 1.14741763, 1.14128171, 1.13514578 ,
+     1.12900986, 1.12287394, 1.11673801, 1.11060209 ,
+     1.10446617, 1.09833024, 1.09219432, 1.08605840 ,
+     1.07992247, 1.07378655, 1.06765063, 1.06151471 ,
+     1.05537878, 1.04924286, 1.04310694, 1.03697101 ,
+     1.03083509, 1.02469917, 1.01856324, 1.01242732 ,
+     1.00629140, 1.00015547, 0.99401955, 0.98788363 ,
+     0.98174770, 0.97561178, 0.96947586, 0.96333993 ,
+     0.95720401, 0.95106809, 0.94493217, 0.93879624 ,
+     0.93266032, 0.92652440, 0.92038847, 0.91425255 ,
+     0.90811663, 0.90198070, 0.89584478, 0.88970886 ,
+     0.88357293, 0.87743701, 0.87130109, 0.86516516 ,
+     0.85902924, 0.85289332, 0.84675739, 0.84062147 ,
+     0.83448555, 0.82834963, 0.82221370, 0.81607778 ,
+     0.80994186, 0.80380593, 0.79767001, 0.79153409 ,
+     0.78539816, 0.77926224, 0.77312632, 0.76699039 ,
+     0.76085447, 0.75471855, 0.74858262, 0.74244670 ,
+     0.73631078, 0.73017486, 0.72403893, 0.71790301 ,
+     0.71176709, 0.70563116, 0.69949524, 0.69335932 ,
+     0.68722339, 0.68108747, 0.67495155, 0.66881562 ,
+     0.66267970, 0.65654378, 0.65040785, 0.64427193 ,
+     0.63813601, 0.63200008, 0.62586416, 0.61972824 ,
+     0.61359232, 0.60745639, 0.60132047, 0.59518455 ,
+     0.58904862, 0.58291270, 0.57677678, 0.57064085 ,
+     0.56450493, 0.55836901, 0.55223308, 0.54609716 ,
+     0.53996124, 0.53382531, 0.52768939, 0.52155347 ,
+     0.51541754, 0.50928162, 0.50314570, 0.49700978 ,
+     0.49087385, 0.48473793, 0.47860201, 0.47246608 ,
+     0.46633016, 0.46019424, 0.45405831, 0.44792239 ,
+     0.44178647, 0.43565054, 0.42951462, 0.42337870 ,
+     0.41724277, 0.41110685, 0.40497093, 0.39883500 ,
+     0.39269908, 0.38656316, 0.38042724, 0.37429131 ,
+     0.36815539, 0.36201947, 0.35588354, 0.34974762 ,
+     0.34361170, 0.33747577, 0.33133985, 0.32520393 ,
+     0.31906800, 0.31293208, 0.30679616, 0.30066023 ,
+     0.29452431, 0.28838839, 0.28225246, 0.27611654 ,
+     0.26998062, 0.26384470, 0.25770877, 0.25157285 ,
+     0.24543693, 0.23930100, 0.23316508, 0.22702916 ,
+     0.22089323, 0.21475731, 0.20862139, 0.20248546 ,
+     0.19634954, 0.19021362, 0.18407769, 0.17794177 ,
+     0.17180585, 0.16566993, 0.15953400, 0.15339808 ,
+     0.14726216, 0.14112623, 0.13499031, 0.12885439 ,
+     0.12271846, 0.11658254, 0.11044662, 0.10431069 ,
+     0.09817477, 0.09203885, 0.08590292, 0.07976700 ,
+     0.07363108, 0.06749515, 0.06135923, 0.05522331 ,
+     0.04908739, 0.04295146, 0.03681554, 0.03067962 ,
+     0.02454369, 0.01840777, 0.01227185, 0.00613592 ,
+};
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -174,8 +247,10 @@ volatile static uint16_t adc4_measurments;
 void RAMP();
 uint8_t RAMP_FINISHED = 0;
 void regulatorPI(uint32_t *out, uint32_t *integral, float in, float in_zad, float limp, float limn, float kp, float ti, float Ts1);
-float delay_tr = 0; // DELAY/DEADTIME after first stage inductor  positive ramp
-float delay_hc = 0; // DELAY/DEADTIME after second stage inductor negative ramp
+float delay_tr = 1e-6; // DELAY/DEADTIME after first stage inductor  positive ramp
+float delay_hc = 1e-6; // DELAY/DEADTIME after second stage inductor negative ramp
+float delay_tr_freq_ACC = 1e6;
+float delay_hc_freq_ACC = 1e6;
 float Gv = 1;
 //Filter butterworth 500khz sampleing rate 200khz cutoff
 /*#define N 4 // Order of the filter
@@ -250,21 +325,30 @@ uint32_t output_vol_y_n1 = 1;
 // CORDIC
 int32_t float_to_integer(float in, int scaling_factor, uint8_t bits);
 float integer_to_float(int32_t result_cordic_integer, int squarted_scaling_factor, int8_t mode, uint8_t bits);
+static inline float approx_acos(float x);
+static inline float approx_acos2(float x);
+static inline float approx_acos3(float x);
 
 CORDIC_HandleTypeDef hcordic;        // CORDIC handle (assume it's declared globally or in main)
 CORDIC_ConfigTypeDef sCordicConfig;  // config structure
-int32_t result_q31;
-int16_t result_q16;
-int32_t value_cordic = 1073741824;
+int32_t result_q31 = 1;
+int16_t result_q16 = 1;
+int32_t value_cordic = 1;
 
 int32_t start_ticks = 0;
 int32_t stop_ticks = 0;
 int32_t elapsed_ticks = 0;
-float resultcordic;
-float obl;
-int32_t beforea;
-float resultcordic_float;
+int32_t elapsed_ticks2 = 0;
+int32_t elapsed_ticks3 = 0;
+int32_t elapsed_ticks4 = 0;
+int32_t elapsed_ticks5 = 0;
+float resultcordic = 1;
+float obl = 1;
+int32_t cordic_input = 1;
+float resultcordic_float = 1;
+float acos1, acos2, acos3, acos4, acos5;
 
+float lookup_acos(float x) ;
 /* USER CODE END 0 */
 
 /**
@@ -316,31 +400,58 @@ int main(void)
   /* USER CODE BEGIN 2 */
 
   sCordicConfig.Function   = CORDIC_FUNCTION_SQUAREROOT;       /* Compute sine (and cosine) */
-  sCordicConfig.Precision  = CORDIC_PRECISION_2CYCLES;    /* Maximum precision (24 iterations) */
+  sCordicConfig.Precision  = CORDIC_PRECISION_6CYCLES;    /* Maximum precision (24 iterations) */
   sCordicConfig.Scale      = CORDIC_SCALE_0;              /* No additional scaling */
   sCordicConfig.NbWrite    = CORDIC_NBWRITE_1;            /* One input (angle); implicit modulus = 1 */
   sCordicConfig.NbRead     = CORDIC_NBREAD_1;             /* Two outputs (sine and cosine) */
   sCordicConfig.InSize     = CORDIC_INSIZE_32BITS;        /* 32-bit input (Q1.31 format) */
   sCordicConfig.OutSize    = CORDIC_OUTSIZE_32BITS;       /* 32-bit output (Q1.31 format) */
-  Gv = 2;
-  obl = (((2-Gv)/Gv)/Z);
-  // GV from  0.8 to 1.99
-  //
+
+
   if (HAL_CORDIC_Configure(&hcordic, &sCordicConfig) != HAL_OK)
     {
       /* Configuration Error */
       Error_Handler();
     }
-  	  start_ticks = SysTick->VAL;
+  	  //start_ticks = SysTick->VAL;
+ /* Gv = 1.001;
+  float funk = ((2-Gv)/Gv);
+  	 // beforea = float_to_integer(obl, 100, 32);
+  	 // HAL_CORDIC_Calculate(&hcordic, &beforea, &result_q31, 1, 100);//sqrt((2-Gv)/Gv)/Z)
+  	 // resultcordic = approx_acos(1.5);//approx_acos((1-Gv))/wr;//sqrt(obl);
+  	  //resultcordic = integer_to_float(result_q31, 10, 1, 32);
+  start_ticks = SysTick->VAL;
+  	  	acos4 =	acos(funk);
+  	  	    	  	  	  stop_ticks = SysTick->VAL;
 
-  	  beforea = float_to_integer(obl, 100, 32);
-  	  HAL_CORDIC_Calculate(&hcordic, &beforea, &result_q31, 1, 100);//sqrt((2-Gv)/Gv)/Z)
-  	 // resultcordic = sqrt(obl);
-  	  resultcordic = integer_to_float(result_q31, 10, 1, 32);
-
+  	  	    	  	  	  elapsed_ticks4 = start_ticks-stop_ticks;
+  	  	    	  	  	  funk = 0;
+  	 start_ticks = SysTick->VAL;
+  	//acos1 = approx_acos(funk);
+  	funk = ((2-Gv)/Gv)/Z;
   	  stop_ticks = SysTick->VAL;
 
   	  elapsed_ticks = start_ticks-stop_ticks;
+  	funk = 0;
+  	 start_ticks = SysTick->VAL;
+  	//acos2 = approx_acos2(funk);
+  	funk = ((2-Gv)/Gv)*(1/Z);
+  	  	  stop_ticks = SysTick->VAL;
+
+  	  	  elapsed_ticks2 = start_ticks-stop_ticks;
+
+  	  	 start_ticks = SysTick->VAL;
+  	  	acos3 =	approx_acos3(funk);
+  	  	  	  stop_ticks = SysTick->VAL;
+
+  	  	  	  elapsed_ticks3 = start_ticks-stop_ticks;
+
+  	  	  start_ticks = SysTick->VAL;
+  	  	   	  	acos5 =	lookup_acos(funk);
+  	  	   	  	  	  stop_ticks = SysTick->VAL;
+
+  	  	   	  	  	  elapsed_ticks5 = start_ticks-stop_ticks;
+*/
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -481,6 +592,7 @@ int main(void)
 	  	                			  	            	  }
 	  	                	  if(flag_control)
 	  	                	  {
+	  	                		// start_ticks = SysTick->VAL;
 
 	  	                		  	  	input_vol = Low_pass_filter(input_voltage, input_vol, input_vol_x_n1, input_vol_y_n1); //input_voltage;
 	  	                		  	  	output_vol = Low_pass_filter(output_voltage, output_vol, output_vol_x_n1, output_vol_y_n1); //output_voltage;
@@ -493,18 +605,33 @@ int main(void)
 
 	  	                				if(Gv<2) //CZARY
 	  	                				{
-	  	                					delay_tr = acos(1-Gv)/wr;
-	  	                					imin = (int)(Imin_Factor*output_vol*sqrt((2-Gv)/Gv)/Z); //[mA] Negative current needed to Zero voltage switching in resonance
+
+	  	                					delay_tr = approx_acos2((1-Gv))*INV_wr;
+	  	                					 // start_ticks = SysTick->VAL;
+
+	  	                					cordic_input = float_to_integer(((2-Gv)/Gv), 100, 32);
+	  	                					HAL_CORDIC_Calculate(&hcordic, &cordic_input, &result_q31, 1, 100);//sqrt((2-Gv)/Gv))
+	  	                					resultcordic = integer_to_float(result_q31, 10, 1, 32); // result of sqrt((((2-Gv)/Gv)) ) in float
+
+
+	  	                					imin = (int)(Imin_Factor*output_vol*resultcordic*INV_Z); //[mA] Negative current needed to Zero voltage switching in resonance
+
 	  	                					if(imin>4000) imin = 4000;
 	  	                				} else if(Gv>=2)
 	  	                				{
-	  	                					delay_tr = (M_PI-acos(1/(Gv-1)))/wr;
+	  	                					delay_tr = (M_PI-approx_acos2((1/(Gv-1))))*INV_wr;
 	  	                					imin = 0;
 	  	                				}
 	  	                				if(/*once == 0*/delay_tr<0.001){
-	  	                				int delay_tr_freq = (int)(1/delay_tr);
-	  	                				if(delay_tr_freq>20000000) delay_tr_freq = 10000000;//10Mhz
-	  	                				if(/*once == 0*/ 1) Update_PWM_Frequency(&htim1, TIM_CHANNEL_1, delay_tr_freq); // Set TIM1 CH1 to freq that is delay tr and send to fpga
+
+	  	                					int delay_tr_freq = (int)(1/delay_tr);
+
+	  	                					if(delay_tr_freq>10000000) delay_tr_freq = 10000000;//10Mhz
+
+	  	                					if(abs(delay_tr_freq_ACC-delay_tr_freq)>=10000) {
+	  	                						Update_PWM_Frequency(&htim1, TIM_CHANNEL_1, delay_tr_freq); // Set TIM1 CH1 to freq that is delay tr and send to fpga
+	  	                						delay_tr_freq_ACC = delay_tr_freq;
+	  	                					}
 	  	                				}
 
 	  	                				if(RAMP_FINISHED == 0) RAMP(); // Adding to Vramp stepping voltage to create starting ramp
@@ -513,21 +640,27 @@ int main(void)
 
 	  	                				if(/*once == 0*/ output_vol>40000)
 	  	                				{
-	  	                				delay_hc = (2*C_CAP*output_vol)/imax1;
-	  	                				int delay_hc_freq = (int)(1/delay_hc);
-	  	                				if(delay_hc_freq>20000000) delay_hc_freq = 10000000;//10Mhz jakis problem
-	  	                				if(/*once == 0*/ 1) Update_PWM_Frequency(&htim8, TIM_CHANNEL_2, delay_hc_freq); // Set TIM8 CH1 o freq that is delay hc and send to fpga
+	  	                					delay_hc = (2*C_CAP*output_vol)*(1/imax1);
+	  	                					int delay_hc_freq = (int)(1/delay_hc);
+	  	                					if(delay_hc_freq>10000000) delay_hc_freq = 10000000;//10Mhz jakis problem
+
+	  	                					if(abs(delay_hc_freq_ACC-delay_hc_freq)>=10000) {
+	  	                						Update_PWM_Frequency(&htim8, TIM_CHANNEL_2, delay_hc_freq); // Set TIM8 CH1 o freq that is delay hc and send to fpga
+	  	                						delay_hc_freq_ACC = delay_hc_freq;
+	  	                					}
 	  	                				}
 
 	  	                				imax2 =  imax1 + imax2_sum;//
 
 	  	                				if(once == 0){
-	  	                							HAL_Delay(500);
-	  	                						HAL_GPIO_WritePin(START_STOP_FPGA_GPIO_Port, START_STOP_FPGA_Pin, 1); // START FPGA DANCE
-	  	                						once = 1;
-	  	                						}
+	  	                					HAL_Delay(500);
+	  	                					HAL_GPIO_WritePin(START_STOP_FPGA_GPIO_Port, START_STOP_FPGA_Pin, 1); // START FPGA DANCE
+	  	                					once = 1;
+	  	                				}
 
 	  	                				flag_control = 0;
+	  	                				stop_ticks = SysTick->VAL;
+	  	                				elapsed_ticks = start_ticks-stop_ticks;
 	  	                	  }
 
 	  	                  }
@@ -2214,6 +2347,44 @@ float integer_to_float(int32_t result_cordic_integer, int squarted_scaling_facto
 
 	return acc;
 
+}
+
+// Simple polynomial approximation for acos(x) for x in [0.5, 1]:
+static inline float approx_acos(float x) {
+    // Example coefficients – you would need to adjust these for your range and precision.
+    float a0 = 1.5708f;  // ~pi/2
+    float a1 = -1.5700f;
+    return a0 + a1 * x;
+}
+static inline float approx_acos2(float x) {
+    // Example coefficients – you would need to adjust these for your range and precision.
+	if (x < -1.0f) x = -1.0f;
+	    else if (x > 1.0f) x = 1.0f;
+	    float sqrt_val = sqrtf(1.0f - x);
+	    return sqrt_val * (1.5707963050f + x * (-0.2145988016f + 0.0889789874f * x));
+}
+
+static inline float approx_acos3(float x) {
+    // Example coefficients – you would need to adjust these for your range and precision.
+	return (-0.69813170079773212 * x * x - 0.87266462599716477) * x + 1.5707963267948966;
+
+}
+
+float lookup_acos(float x) {
+	// Clamp x to [0, 1] quickly using fminf/fmaxf.
+	    x = fmaxf(0.0f, fminf(x, 1.0f));
+
+	    // Multiply by 256 instead of dividing by 0.00390625.
+	    int index = (int)(x * 256.0f);
+
+	    // Make sure index is within [1, LUT_SIZE-1] so that index-1 is valid.
+	    if(index < 1)
+	        index = 1;
+	    else if(index >= LUT_SIZE)
+	        index = LUT_SIZE - 1;
+
+	    // Return the corresponding LUT entry.
+	    return acos_lut[index - 1];
 }
 
 void DisplayAllVariables(void) {
