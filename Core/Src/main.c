@@ -60,7 +60,7 @@ typedef enum {
 #define Z 146.128				//sqrt(L_IND/(2*C_CAP)) // impedance of inductor and two capacitor on Dren-Source MOSFETs
 #define INV_Z 0.0069867531		// 1/Z
 #define Ts 0.00005				// Sampling rate of control loop 20khz
-#define ALPHA 0.3 // smoothing factor 0-1
+#define ALPHA 0.7 // smoothing factor 0-1
 
 #define LUT_SIZE 256
 
@@ -291,10 +291,10 @@ volatile uint8_t dataReceivedFlag = 0; // Flags to indicate new data received
 
 
 //Regulator PI of voltage
-float Kp = 0.0000001; 			// Proportional part of PI
-float Ti = 0.000005; 			// Integral part of PI
-uint32_t LIM_PEAK_POS = 15000; 	// Positive limit for PI regulator [mA]
-uint32_t LIM_PEAK_NEG = 5000; 	// Negative limit for PI regulator [mA]
+float Kp = 0.1; 			// Proportional part of PI
+float Ti = 10; 			// Integral part of PI
+uint32_t LIM_PEAK_POS = 10000; 	// Positive limit for PI regulator [mA]
+uint32_t LIM_PEAK_NEG = 0; 	// Negative limit for PI regulator [mA]
 uint32_t Integral_I = 0;		// Integral part of PI
 uint32_t prev_delta = 0; 		// buffer  error n-1
 
@@ -601,7 +601,7 @@ int main(void)
 	  	                		  	  	output_vol_x_n1 = output_voltage;
 	  	                		  	  	output_vol_y_n1 = output_vol;
 
-	  	                		  	  	Gv = (float)output_vol/(float)input_vol;//output_voltage/input_voltage;
+	  	                		  	  	Gv = (float)output_voltage/(float)input_voltage;//output_voltage/input_voltage;
 
 	  	                				if(Gv<2) //CZARY
 	  	                				{
@@ -626,7 +626,7 @@ int main(void)
 
 	  	                					int delay_tr_freq = (int)(1/delay_tr);
 
-	  	                					if(delay_tr_freq>10000000) delay_tr_freq = 10000000;//10Mhz
+	  	                					if(delay_tr_freq>10000000) delay_tr_freq = 1000000;//10Mhz
 
 	  	                					if(abs(delay_tr_freq_ACC-delay_tr_freq)>=10000) {
 	  	                						Update_PWM_Frequency(&htim1, TIM_CHANNEL_1, delay_tr_freq); // Set TIM1 CH1 to freq that is delay tr and send to fpga
@@ -636,13 +636,13 @@ int main(void)
 
 	  	                				if(RAMP_FINISHED == 0) RAMP(); // Adding to Vramp stepping voltage to create starting ramp
 
-	  	                				regulatorPI(&imax1, &Integral_I, output_vol, Vramp, LIM_PEAK_POS, LIM_PEAK_NEG, Kp, Ti, Ts);
+	  	                				regulatorPI(&imax1, &Integral_I, output_voltage, Vramp, LIM_PEAK_POS, LIM_PEAK_NEG, Kp, Ti, Ts);
 
 	  	                				if(/*once == 0*/ output_vol>40000)
 	  	                				{
 	  	                					delay_hc = (2*C_CAP*output_vol)*(1/imax1);
 	  	                					int delay_hc_freq = (int)(1/delay_hc);
-	  	                					if(delay_hc_freq>10000000) delay_hc_freq = 10000000;//10Mhz jakis problem
+	  	                					if(delay_hc_freq>10000000) delay_hc_freq = 1000000;//10Mhz jakis problem
 
 	  	                					if(abs(delay_hc_freq_ACC-delay_hc_freq)>=10000) {
 	  	                						Update_PWM_Frequency(&htim8, TIM_CHANNEL_2, delay_hc_freq); // Set TIM8 CH1 o freq that is delay hc and send to fpga
