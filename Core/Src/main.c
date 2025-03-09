@@ -64,6 +64,10 @@ typedef enum {
 
 #define LUT_SIZE 256
 
+// fixed point format
+#define FP_SHIFT 24
+#define FP_SCALE (1 << FP_SHIFT)
+
 // Precomputed lookup table for acos(x) for x in [0, 1] (in radians).
 // Generated with: for (i=0;i<256;i++){ x = i/255.0; table[i] = acos(x); }
 static const float acos_lut[LUT_SIZE] = {
@@ -237,16 +241,18 @@ uint16_t adc3_moving_average[5][MA_WINDOW_SIZE];
  * 3 - PCB temperature (MCP9700)
  * 4 - Heatsink Temprature (TMP236)
  */
-uint16_t vref = 48000; 			//[mV]  Reference voltage its compare to output voltage
-uint16_t step_size = 0.0125;
+uint32_t vref = 48000; 			//[mV]  Reference voltage its compare to output voltage
+//uint32_t step_size = 2000;
 uint32_t output_voltage = 0; 	// Measured voltage 0.2V BIAS
-uint16_t vout = 0; 				//Voltage comparing to vref
-uint16_t Vramp = 0; 			// ramp voltage
+uint32_t vout = 0; 				//Voltage comparing to vref
+uint32_t Vramp = 0; 			// ramp voltage
 volatile static uint16_t adc4_dma_buffer[2];
 volatile static uint16_t adc4_measurments;
-void RAMP();
+uint32_t RAMP(int32_t Vout, int32_t Vref, int32_t Ramp_ratio, float freq_loop);
 uint8_t RAMP_FINISHED = 0;
-void regulatorPI(uint32_t *out, uint32_t *integral, float in, float in_zad, float limp, float limn, float kp, float ti, float Ts1);
+void regulatorPI(int32_t *out, int32_t *integral, int32_t in, int32_t in_zad, int32_t limp, int32_t limn, float kp, float ti, float Ts1);
+uint32_t prev_out;
+uint32_t delta;
 float delay_tr = 1e-6; // DELAY/DEADTIME after first stage inductor  positive ramp
 float delay_hc = 1e-6; // DELAY/DEADTIME after second stage inductor negative ramp
 float delay_tr_freq_ACC = 1e6;
@@ -291,12 +297,14 @@ volatile uint8_t dataReceivedFlag = 0; // Flags to indicate new data received
 
 
 //Regulator PI of voltage
-float Kp = 0.1; 			// Proportional part of PI
-float Ti = 10; 			// Integral part of PI
-uint32_t LIM_PEAK_POS = 10000; 	// Positive limit for PI regulator [mA]
+float Kp = 2; 			// Proportional part of PI
+float Ti = 1; 			// Integral part of PI
+uint32_t LIM_PEAK_POS = 14000; 	// Positive limit for PI regulator [mA]
 uint32_t LIM_PEAK_NEG = 0; 	// Negative limit for PI regulator [mA]
 uint32_t Integral_I = 0;		// Integral part of PI
 uint32_t prev_delta = 0; 		// buffer  error n-1
+
+
 
 uint8_t start_program = 0;
 uint8_t stop_program = 0;
@@ -321,6 +329,13 @@ uint32_t input_vol_x_n1 = 1;
 uint32_t input_vol_y_n1 = 1;
 uint32_t output_vol_x_n1 = 1;
 uint32_t output_vol_y_n1 = 1;
+
+
+// Convert float to Q8.24 fixed-point
+static inline int32_t float_to_fixed(float x);
+
+// Convert Q8.24 fixed-point back to float (if needed)
+static inline float fixed_to_float(int32_t x);
 
 // CORDIC
 int32_t float_to_integer(float in, int scaling_factor, uint8_t bits);
@@ -634,7 +649,7 @@ int main(void)
 	  	                					}
 	  	                				}
 
-	  	                				if(RAMP_FINISHED == 0) RAMP(); // Adding to Vramp stepping voltage to create starting ramp
+	  	                				if(RAMP_FINISHED == 0) Vramp = RAMP(output_voltage, 48000, 2000 , Ts); // Adding to Vramp stepping voltage to create starting ramp
 
 	  	                				regulatorPI(&imax1, &Integral_I, output_voltage, Vramp, LIM_PEAK_POS, LIM_PEAK_NEG, Kp, Ti, Ts);
 
@@ -2073,36 +2088,36 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
 
 }
 
-void RAMP()
+uint32_t RAMP(int32_t Vout, int32_t Vref, int32_t Ramp_ratio, float freq_loop)
 {
 	// RAMP Voltage to soft-start
-				if((vref-output_vol)>100)
+				if(((int32_t)Vref-(int32_t)Vout)>100)
 				{
 
-					Vramp = output_voltage+400000*Ts; // 200mV step per loop period
+					Vout = (int32_t)(Vout+Ramp_ratio*freq_loop); // 20khz loop - preferred 0.1V  that mean ramp ratio = 2000
 					//RAMP_FINISHED = 0;
 				}
-				//else if((vref-output_voltage)<-100)
-				//{
-				//	Vramp = output_voltage-4000000*Ts;
-				//}
+				else if(((int32_t)Vref-(int32_t)Vout)<-100)
+				{
+					Vout = (int32_t)(Vout-Ramp_ratio*freq_loop);
+				}
 				if(Vramp>=48000)
 				{
-					Vramp = 48000; // 48V
+					Vout = 48000; // 48V
 					RAMP_FINISHED = 1;
 					//currentState = STATE_REGULATION;
 				}
 
-
+				return Vout;
 }
 
-void regulatorPI(uint32_t *out, uint32_t *integral, float in, float in_zad, float limp, float limn, float kp, float ti, float Ts1)
+void regulatorPI(int32_t *out, int32_t *integral, int32_t in, int32_t in_zad, int32_t limp, int32_t limn, float kp, float ti, float Ts1)
 {
 	// Tustin transfrom of PI regulator s -> 2/T * (Z-1)/(Z+1)
-    float delta;
-    uint32_t prev_out;
-    delta = in_zad - in; // error
-    *integral = *integral + (delta + prev_delta) * (kp / ti) * Ts1 * 0.5 ; // I part
+
+
+    delta =(int32_t)in_zad - (int32_t)in; // error
+    *integral = (int32_t)(*integral + (int32_t)((delta + prev_delta) * (int32_t)((kp / ti) * Ts1 * 0.5))) ; // I part
     prev_delta = delta;
     prev_out = *out;
     if (*integral >= limp) // limit peak positive
@@ -2113,7 +2128,7 @@ void regulatorPI(uint32_t *out, uint32_t *integral, float in, float in_zad, floa
     {
         *integral = limn;
     }
-    *out = (delta * kp + *integral); // Sum of P and I
+    *out = ((int32_t)((int32_t)delta * (int32_t)kp) + *integral); // Sum of P and I
     if (*out >= limp) // limit peak positive
     {
         *out = limp;
@@ -2122,7 +2137,7 @@ void regulatorPI(uint32_t *out, uint32_t *integral, float in, float in_zad, floa
     {
         *out = limn;
     }
-    if((*out - prev_out) < 50 || (*out - prev_out) > -50) // histeresis to probably prevent jitter
+    if((*out - prev_out) < 50 || (*out - prev_out) > -50) // histeresis to probably prevent jitter must be checked
     {
     	*out = prev_out;
     }
@@ -2347,6 +2362,17 @@ float integer_to_float(int32_t result_cordic_integer, int squarted_scaling_facto
 
 	return acc;
 
+}
+
+
+// Convert float to Q8.24 fixed-point
+static inline int32_t float_to_fixed(float x) {
+    return (int32_t)(x * FP_SCALE + (x >= 0 ? 0.5f : -0.5f));
+}
+
+// Convert Q8.24 fixed-point back to float (if needed)
+static inline float fixed_to_float(int32_t x) {
+    return ((float)x) / FP_SCALE;
 }
 
 // Simple polynomial approximation for acos(x) for x in [0.5, 1]:
