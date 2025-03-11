@@ -53,12 +53,12 @@ typedef enum {
 #define MA_WINDOW_SIZE 10  		// Moving average window
 #define BUFFER_SIZE 100  		// Buffer size for DAC test - not used in final program
 #define res12_b 4096
-#define L_IND 0.0000000022  	// 94uH
-#define C_CAP 0.0000000022 		// 2.2nF
+#define L_IND 0.000094  	// 94uH
+#define C_CAP 0.0000000044 		// 4.4nF
 #define wr 69536414				//	1/sqrt(L_IND*C_CAP)	- Omega of LC resonance
 #define INV_wr 1.43e-8			//	1/wr
-#define Z 146.128				//sqrt(L_IND/(2*C_CAP)) // impedance of inductor and two capacitor on Dren-Source MOSFETs
-#define INV_Z 0.0069867531		// 1/Z
+#define Z 146.16304718				//sqrt(L_IND/(2*C_CAP)) // impedance of inductor and two capacitor on Dren-Source MOSFETs
+#define INV_Z 0.0068416745		// 1/Z
 #define Ts 0.00005				// Sampling rate of control loop 20khz
 #define ALPHA 0.05 // smoothing factor 0-1
 
@@ -253,10 +253,10 @@ uint8_t RAMP_FINISHED = 0;
 void regulatorPI(int32_t *out, int32_t *integral, int32_t in, int32_t in_zad, int32_t limp, int32_t limn, float kp, float ti, float Ts1);
 int32_t prev_out;
 int32_t delta;
-float delay_tr = 1e-6; // DELAY/DEADTIME after first stage inductor  positive ramp
-float delay_hc = 1e-6; // DELAY/DEADTIME after second stage inductor negative ramp
-float delay_tr_freq_ACC = 1e6;
-float delay_hc_freq_ACC = 1e6;
+float delay_tr = 1e-7; // DELAY/DEADTIME after first stage inductor  positive ramp
+float delay_hc = 1e-7; // DELAY/DEADTIME after second stage inductor negative ramp
+float delay_tr_freq_ACC = 1;
+float delay_hc_freq_ACC = 1;
 float Gv = 1;
 //Filter butterworth 500khz sampleing rate 200khz cutoff
 /*#define N 4 // Order of the filter
@@ -297,8 +297,8 @@ volatile uint8_t dataReceivedFlag = 0; // Flags to indicate new data received
 
 
 //Regulator PI of voltage
-float Kp = 0.4; 			// Proportional part of PI
-float Ti = 0.0005; 			// Integral part of PI
+float Kp = 0.001; 			// Proportional part of PI
+float Ti = 5e-5; 			// Integral part of PI
 int32_t LIM_PEAK_POS = 10000; 	// Positive limit for PI regulator [mA]
 int32_t LIM_PEAK_NEG = 0; 	// Negative limit for PI regulator [mA]
 int32_t Integral_I = 0;		// Integral part of PI
@@ -598,7 +598,8 @@ int main(void)
 	  	                		//Start timer that start_program ramp and pi regulation
 	  	                		HAL_GPIO_WritePin(RESET_FPGA_GPIO_Port, RESET_FPGA_Pin, 0); // RESET =  0  = reset turn off
 	  	                		HAL_TIM_Base_Start_IT(&htim15); // START TIM15 THATS IS MAIN CONTROL LOOP
-
+	  	                		HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
+	  	                		HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_2);
 	  	                		 }
 	  	                	  if(flag_control)
 	  	                	  {
@@ -629,33 +630,40 @@ int main(void)
 	  	                					delay_tr = (M_PI-approx_acos2((1/(Gv-1)))) * INV_wr;
 	  	                					imin = 0;
 	  	                				}
-	  	                				if(/*once == 0*/delay_tr < 0.001){
+	  	                				if(/*once == 0*/delay_tr < 0.001 /*&& RAMP_FINISHED == 1*/){
 
 	  	                					int delay_tr_freq = (int)(1/delay_tr);
 
-	  	                					if(delay_tr_freq>10000000) delay_tr_freq = 1000000;//10Mhz
+	  	                					if(delay_tr_freq>20000000) delay_tr_freq = 20000000;//10Mhz
 
-	  	                					if(abs(delay_tr_freq_ACC-delay_tr_freq) >= 10000) {
+	  	                					if(abs(delay_tr_freq_ACC-delay_tr_freq) >= 100000) {
 	  	                						Update_PWM_Frequency(&htim1, TIM_CHANNEL_1, delay_tr_freq); // Set TIM1 CH1 to freq that is delay tr and send to fpga
 	  	                						delay_tr_freq_ACC = delay_tr_freq;
 	  	                					}
 	  	                				}
+	  	                				if(/*once == 0 output_vol> 47000 && RAMP_FINISHED == 1 */ imax1 > 0 && output_vol> 47000 && RAMP_FINISHED == 1 ){
 
-	  	                				if(RAMP_FINISHED == 0) Vramp = RAMP(Vramp, 48000, 200000 , Ts); // Adding to Vramp stepping voltage to create starting ramp
+	  	            	  	                		delay_hc = (float)(((float)C_CAP*output_vol) * (float)(1/(float)imax1));
+	  	                					  	    int delay_hc_freq = (int)(1/delay_hc);
 
-	  	                				regulatorPI(&imax1, &Integral_I, output_vol, Vramp, LIM_PEAK_POS, LIM_PEAK_NEG, Kp, Ti, Ts);
+	  	                					  	   if(delay_hc_freq>20000000) delay_hc_freq = 20000000;//10Mhz jakis problem
 
-	  	                				if(/*once == 0*/ output_vol > 40000)
-	  	                				{
-	  	                					delay_hc = (2*C_CAP*output_vol) * (1/imax1);
-	  	                					int delay_hc_freq = (int)(1/delay_hc);
-	  	                					if(delay_hc_freq>10000000) delay_hc_freq = 1000000;//10Mhz jakis problem
+	  	                					  	   if(abs(delay_hc_freq_ACC-delay_hc_freq) >= 100000) {
+	  	                					  		 start_ticks = SysTick->VAL;
 
-	  	                					if(abs(delay_hc_freq_ACC-delay_hc_freq) >= 10000) {
-	  	                						Update_PWM_Frequency(&htim8, TIM_CHANNEL_2, delay_hc_freq); // Set TIM8 CH1 o freq that is delay hc and send to fpga
-	  	                						delay_hc_freq_ACC = delay_hc_freq;
-	  	                					}
+	  	                					  	    Update_PWM_Frequency(&htim8, TIM_CHANNEL_2, delay_hc_freq); // Set TIM8 CH1 o freq that is delay hc and send to fpga
+
+	  	                					  	    stop_ticks = SysTick->VAL;
+	  	                					  	    elapsed_ticks = start_ticks-stop_ticks;
+
+	  	                					  	    delay_hc_freq_ACC = delay_hc_freq;
+	  	                					  	   }
 	  	                				}
+	  	                				if(RAMP_FINISHED == 0) Vramp = RAMP(Vramp, 48000, 20000, Ts); // Adding to Vramp stepping voltage to create starting ramp
+
+	  	                				if (Vramp > 0 ) regulatorPI(&imax1, &Integral_I, output_vol, Vramp, LIM_PEAK_POS, LIM_PEAK_NEG, Kp, Ti, Ts);
+
+
 
 	  	                				imax2 =  imax1 + imax2_sum;//
 
@@ -666,8 +674,7 @@ int main(void)
 	  	                				}
 
 	  	                				flag_control = 0;
-	  	                				stop_ticks = SysTick->VAL;
-	  	                				elapsed_ticks = start_ticks-stop_ticks;
+
 	  	                	  }
 
 	  	                  }
@@ -728,7 +735,8 @@ int main(void)
 						output_vol_x_n1 = 1;
 						output_vol_y_n1 = 1;
 						imin = 1;
-
+						HAL_TIM_PWM_Stop(&htim8, TIM_CHANNEL_2);
+						HAL_TIM_PWM_Stop(&htim1, TIM_CHANNEL_1);
 	  	            	currentState = STATE_STANDBY;
 	  	              }
 
@@ -2083,13 +2091,13 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
 int32_t RAMP(int32_t Vout, int32_t Vref, int32_t Ramp_ratio, float period_loop)
 {
 	// RAMP Voltage to soft-start
-				if(((int32_t)Vref - (int32_t)Vout) > 50)
+				if(((int32_t)Vref - (int32_t)Vout) > 10)
 				{
 
 					Vout = (int32_t)(Vout + Ramp_ratio * period_loop); // 20khz loop - preferred 0.1V/Ts voltage ramp   that mean ramp ratio = 2000
 					//RAMP_FINISHED = 0;
 				}
-				else if(((int32_t)Vref - (int32_t)Vout) < -50) // 100 = 100mV
+				else if(((int32_t)Vref - (int32_t)Vout) < -10) // 100 = 100mV
 				{
 					Vout = (int32_t)(Vout - Ramp_ratio * period_loop);
 				}

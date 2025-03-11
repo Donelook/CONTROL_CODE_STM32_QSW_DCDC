@@ -65,6 +65,7 @@ extern DMA_HandleTypeDef hdma_dac2_ch1;
 extern DAC_HandleTypeDef hdac1;
 extern TIM_HandleTypeDef htim1;
 extern TIM_HandleTypeDef htim6;
+extern TIM_HandleTypeDef htim8;
 extern TIM_HandleTypeDef htim15;
 /* USER CODE BEGIN EV */
 
@@ -305,6 +306,20 @@ void TIM1_BRK_TIM15_IRQHandler(void)
   /* USER CODE BEGIN TIM1_BRK_TIM15_IRQn 1 */
 
   /* USER CODE END TIM1_BRK_TIM15_IRQn 1 */
+}
+
+/**
+  * @brief This function handles TIM8 break interrupt.
+  */
+void TIM8_BRK_IRQHandler(void)
+{
+  /* USER CODE BEGIN TIM8_BRK_IRQn 0 */
+
+  /* USER CODE END TIM8_BRK_IRQn 0 */
+  HAL_TIM_IRQHandler(&htim8);
+  /* USER CODE BEGIN TIM8_BRK_IRQn 1 */
+
+  /* USER CODE END TIM8_BRK_IRQn 1 */
 }
 
 /**
