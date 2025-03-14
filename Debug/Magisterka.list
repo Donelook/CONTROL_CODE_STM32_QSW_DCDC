@@ -39,13 +39,13 @@ Idx Name          Size      VMA       LMA       File off  Algn
                   CONTENTS, READONLY, DEBUGGING, OCTETS
  17 .debug_line   000267ea  00000000  00000000  00074a07  2**0
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 18 .debug_str    0011f296  00000000  00000000  0009b1f1  2**0
+ 18 .debug_str    0011f29a  00000000  00000000  0009b1f1  2**0
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 19 .comment      00000043  00000000  00000000  001ba487  2**0
+ 19 .comment      00000043  00000000  00000000  001ba48b  2**0
                   CONTENTS, READONLY
- 20 .debug_frame  00009fe0  00000000  00000000  001ba4cc  2**2
+ 20 .debug_frame  00009fe0  00000000  00000000  001ba4d0  2**2
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 21 .debug_line_str 00000053  00000000  00000000  001c44ac  2**0
+ 21 .debug_line_str 00000053  00000000  00000000  001c44b0  2**0
                   CONTENTS, READONLY, DEBUGGING, OCTETS
 
 Disassembly of section .text:
@@ -1965,8 +1965,8 @@ int main(void)
  800150a:	601a      	str	r2, [r3, #0]
  800150c:	e06e      	b.n	80015ec <main+0x5b4>
  800150e:	bf00      	nop
- 8001510:	155f05f7 	.word	0x155f05f7
- 8001514:	3e4eb582 	.word	0x3e4eb582
+ 8001510:	db0b953a 	.word	0xdb0b953a
+ 8001514:	3ea5942f 	.word	0x3ea5942f
  8001518:	03a35639 	.word	0x03a35639
  800151c:	3f7c0604 	.word	0x3f7c0604
  8001520:	20000b8c 	.word	0x20000b8c
@@ -2280,8 +2280,8 @@ int main(void)
  80017de:	bf00      	nop
  80017e0:	54442d18 	.word	0x54442d18
  80017e4:	400921fb 	.word	0x400921fb
- 80017e8:	155f05f7 	.word	0x155f05f7
- 80017ec:	3e4eb582 	.word	0x3e4eb582
+ 80017e8:	db0b953a 	.word	0xdb0b953a
+ 80017ec:	3ea5942f 	.word	0x3ea5942f
  80017f0:	d2f1a9fc 	.word	0xd2f1a9fc
  80017f4:	3f50624d 	.word	0x3f50624d
  80017f8:	20000014 	.word	0x20000014

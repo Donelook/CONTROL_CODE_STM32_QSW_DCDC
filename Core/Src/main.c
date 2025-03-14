@@ -55,8 +55,8 @@ typedef enum {
 #define res12_b 4096
 #define L_IND 0.000094  	// 94uH
 #define C_CAP 0.0000000044 		// 4.4nF
-#define wr 69536414				//	1/sqrt(L_IND*C_CAP)	- Omega of LC resonance
-#define INV_wr 1.43e-8			//	1/wr
+#define wr 1554926				//	1/sqrt(L_IND*C_CAP)	- Omega of LC resonance
+#define INV_wr 0.0000006431		//	1/wr
 #define Z 146.16304718				//sqrt(L_IND/(2*C_CAP)) // impedance of inductor and two capacitor on Dren-Source MOSFETs
 #define INV_Z 0.0068416745		// 1/Z
 #define Ts 0.00005				// Sampling rate of control loop 20khz
@@ -297,7 +297,7 @@ volatile uint8_t dataReceivedFlag = 0; // Flags to indicate new data received
 
 
 //Regulator PI of voltage
-float Kp = 0.001; 			// Proportional part of PI
+float Kp = 0.01; 			// Proportional part of PI
 float Ti = 5e-5; 			// Integral part of PI
 int32_t LIM_PEAK_POS = 10000; 	// Positive limit for PI regulator [mA]
 int32_t LIM_PEAK_NEG = 0; 	// Negative limit for PI regulator [mA]
