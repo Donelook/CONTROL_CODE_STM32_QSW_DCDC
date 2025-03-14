@@ -641,7 +641,7 @@ int main(void)
 	  	                						delay_tr_freq_ACC = delay_tr_freq;
 	  	                					}
 	  	                				}
-	  	                				if(/*once == 0 output_vol> 47000 && RAMP_FINISHED == 1 */ imax1 > 0 && output_vol> 47000 && RAMP_FINISHED == 1 ){
+	  	                				if(/*once == 0 output_vol> 47000 && RAMP_FINISHED == 1 */ imax1 > 0 && output_vol> 47000  ){
 
 	  	            	  	                		delay_hc = (float)(((float)C_CAP*output_vol) * (float)(1/(float)imax1));
 	  	                					  	    int delay_hc_freq = (int)(1/delay_hc);
