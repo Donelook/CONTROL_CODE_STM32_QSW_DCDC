@@ -60,7 +60,7 @@ typedef enum {
 #define Z 146.16304718				//sqrt(L_IND/(2*C_CAP)) // impedance of inductor and two capacitor on Dren-Source MOSFETs
 #define INV_Z 0.0068416745		// 1/Z
 #define Ts 0.00005				// Sampling rate of control loop 20khz
-#define ALPHA 0.05 // smoothing factor 0-1
+#define ALPHA 0.1 // smoothing factor 0-1
 
 #define LUT_SIZE 256
 
@@ -243,9 +243,9 @@ uint16_t adc3_moving_average[5][MA_WINDOW_SIZE];
  */
 int32_t vref = 48000; 			//[mV]  Reference voltage its compare to output voltage
 //uint32_t step_size = 2000;
-int32_t output_voltage = 0; 	// Measured voltage 0.2V BIAS
-int32_t vout = 0; 				//Voltage comparing to vref
-int32_t Vramp = 0; 			// ramp voltage
+int32_t output_voltage = 21000; 	// Measured voltage 0.2V BIAS
+int32_t vout = 21000; 				//Voltage comparing to vref
+int32_t Vramp = 21000; 			// ramp voltage
 volatile static uint16_t adc4_dma_buffer[2];
 volatile static uint16_t adc4_measurments;
 int32_t RAMP(int32_t Vout, int32_t Vref, int32_t Ramp_ratio, float period_loop);
@@ -255,6 +255,8 @@ int32_t prev_out;
 int32_t delta;
 float delay_tr = 1e-7; // DELAY/DEADTIME after first stage inductor  positive ramp
 float delay_hc = 1e-7; // DELAY/DEADTIME after second stage inductor negative ramp
+int delay_tr_freq = 1000000;
+int delay_hc_freq = 1000000;
 float delay_tr_freq_ACC = 1;
 float delay_hc_freq_ACC = 1;
 float Gv = 1;
@@ -281,7 +283,7 @@ float Low_pass_filter(float new_sample, float old_sample, float old_sample_n1, f
  * 0 - imax2_sum
  *
  */
-uint32_t imax2_sum = 0;
+int16_t imax2_sum = 0;
 volatile static uint16_t adc5_dma_buffer[MA_WINDOW_SIZE];
 volatile static uint16_t adc5_measurments[MA_WINDOW_SIZE];
 uint16_t adc_moving_average = 0;
@@ -299,7 +301,7 @@ volatile uint8_t dataReceivedFlag = 0; // Flags to indicate new data received
 //Regulator PI of voltage
 float Kp = 0.01; 			// Proportional part of PI
 float Ti = 5e-5; 			// Integral part of PI
-int32_t LIM_PEAK_POS = 10000; 	// Positive limit for PI regulator [mA]
+int32_t LIM_PEAK_POS = 8000; 	// Positive limit for PI regulator [mA]
 int32_t LIM_PEAK_NEG = 0; 	// Negative limit for PI regulator [mA]
 int32_t Integral_I = 0;		// Integral part of PI
 int32_t prev_delta = 0; 		// buffer  error n-1
@@ -323,8 +325,8 @@ uint8_t interlock = 0;
 uint32_t sythick1 = 0;
 uint32_t sythick2 = 0;
 uint8_t flag_control = 0;
-uint32_t input_vol = 1;
-uint32_t output_vol = 1;
+uint32_t input_vol = 21000;
+uint32_t output_vol = 21000;
 uint32_t input_vol_x_n1 = 1;
 uint32_t input_vol_y_n1 = 1;
 uint32_t output_vol_x_n1 = 1;
@@ -632,26 +634,26 @@ int main(void)
 	  	                				}
 	  	                				if(/*once == 0*/delay_tr < 0.001 /*&& RAMP_FINISHED == 1*/){
 
-	  	                					int delay_tr_freq = (int)(1/delay_tr);
+	  	                					delay_tr_freq = (int)(1/delay_tr);
 
 	  	                					if(delay_tr_freq>20000000) delay_tr_freq = 20000000;//10Mhz
 
-	  	                					if(abs(delay_tr_freq_ACC-delay_tr_freq) >= 100000) {
-	  	                						Update_PWM_Frequency(&htim1, TIM_CHANNEL_1, delay_tr_freq); // Set TIM1 CH1 to freq that is delay tr and send to fpga
+	  	                					if(abs(delay_tr_freq_ACC-delay_tr_freq) >= 20000) {
+	  	                						if(RAMP_FINISHED == 0) Update_PWM_Frequency(&htim1, TIM_CHANNEL_1, delay_tr_freq); // Set TIM1 CH1 to freq that is delay tr and send to fpga
 	  	                						delay_tr_freq_ACC = delay_tr_freq;
 	  	                					}
 	  	                				}
-	  	                				if(/*once == 0 output_vol> 47000 && RAMP_FINISHED == 1 */ imax1 > 0 && output_vol> 47000  ){
+	  	                				if(/*once == 0 output_vol> 47000 && RAMP_FINISHED == 1 */ imax1 > 0 /*&& output_vol> 47000 */ ){
 
 	  	            	  	                		delay_hc = (float)(((float)C_CAP*output_vol) * (float)(1/(float)imax1));
-	  	                					  	    int delay_hc_freq = (int)(1/delay_hc);
+	  	                					  	    delay_hc_freq = (int)(1/delay_hc);
 
 	  	                					  	   if(delay_hc_freq>20000000) delay_hc_freq = 20000000;//10Mhz jakis problem
 
 	  	                					  	   if(abs(delay_hc_freq_ACC-delay_hc_freq) >= 100000) {
 	  	                					  		 start_ticks = SysTick->VAL;
 
-	  	                					  	    Update_PWM_Frequency(&htim8, TIM_CHANNEL_2, delay_hc_freq); // Set TIM8 CH1 o freq that is delay hc and send to fpga
+	  	                					  	     Update_PWM_Frequency(&htim8, TIM_CHANNEL_2, delay_hc_freq); // Set TIM8 CH1 o freq that is delay hc and send to fpga
 
 	  	                					  	    stop_ticks = SysTick->VAL;
 	  	                					  	    elapsed_ticks = start_ticks-stop_ticks;
@@ -659,7 +661,7 @@ int main(void)
 	  	                					  	    delay_hc_freq_ACC = delay_hc_freq;
 	  	                					  	   }
 	  	                				}
-	  	                				if(RAMP_FINISHED == 0) Vramp = RAMP(Vramp, 48000, 20000, Ts); // Adding to Vramp stepping voltage to create starting ramp
+	  	                				if(RAMP_FINISHED == 0) Vramp = RAMP(Vramp, vref, 160000, Ts); // Adding to Vramp stepping voltage to create starting ramp
 
 	  	                				if (Vramp > 0 ) regulatorPI(&imax1, &Integral_I, output_vol, Vramp, LIM_PEAK_POS, LIM_PEAK_NEG, Kp, Ti, Ts);
 
@@ -1900,6 +1902,8 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 		        }
 		        adc_moving_average = ((sum / MA_WINDOW_SIZE)*3300)/4096;
 		        imax2_sum=(adc_moving_average-1450)*0.384;
+		        if(imax2_sum<-1000) imax2_sum = -1000;
+		        if(imax2_sum>1000) imax2_sum = 1000;
 
 		       // adc5_data_ready = 1; // Set flag to indicate new data is ready
 
@@ -2101,9 +2105,9 @@ int32_t RAMP(int32_t Vout, int32_t Vref, int32_t Ramp_ratio, float period_loop)
 				{
 					Vout = (int32_t)(Vout - Ramp_ratio * period_loop);
 				}
-				if(Vout >= 4750)
+				if(Vout >= Vref-50)
 				{
-					Vout = 48000; // 48V
+					Vout = Vref; // 48V
 					RAMP_FINISHED = 1;
 					//currentState = STATE_REGULATION;
 				}
