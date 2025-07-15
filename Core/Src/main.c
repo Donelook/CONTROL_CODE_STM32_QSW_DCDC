@@ -260,6 +260,7 @@ int delay_hc_freq = 1000000;
 float delay_tr_freq_ACC = 1;
 float delay_hc_freq_ACC = 1;
 float Gv = 1;
+float Gv_prev = 1;
 //Filter butterworth 500khz sampleing rate 200khz cutoff
 /*#define N 4 // Order of the filter
 float x[N+1] = {0}; // Input samples
@@ -267,7 +268,9 @@ float y[N+1] = {0}; // Output samples
 float b_z[N+1] = { 0.4328,   1.7314,   2.5971,   1.7314,   0.4328};
 float a_z[N+1] = { 1.0000,   2.3695,   2.3140,   1.0547,   0.1874 };
 void  BUTTERWORHT_FILTER(float new_sample);*/
-
+float b[2] = {0.13575525, 0.13575525};
+float a = 0.7284895;
+float yfilter[2] = {1,1};
 //Simple low pass filter
 float Low_pass_filter(float new_sample, float old_sample, float old_sample_n1, float old_passed);
 
@@ -609,10 +612,14 @@ int main(void)
 
 	  	                		  	  	input_vol = (int32_t)Low_pass_filter(input_voltage, input_vol, input_vol_x_n1, input_vol_y_n1); //input_voltage;
 	  	                		  	  	output_vol = (int32_t)Low_pass_filter(output_voltage, output_vol, output_vol_x_n1, output_vol_y_n1); //output_voltage;
+	  	                		  	  	 //yfilter[1] = a*yfilter[];
+
+
 
 
 	  	                		  	  	Gv = (float)output_vol/(float)input_vol;//output_voltage/input_voltage;
-
+	  	                		  	  	if(abs(Gv-Gv_prev)>=0.02)
+	  	                		  	  	{
 	  	                				if(Gv<2) //CZARY
 	  	                				{
 
@@ -632,6 +639,8 @@ int main(void)
 	  	                					delay_tr = (M_PI-approx_acos2((1/(Gv-1)))) * INV_wr;
 	  	                					imin = 0;
 	  	                				}
+	  	                		  	  	}
+	  	                		  		Gv_prev = Gv;
 	  	                				if(/*once == 0*/delay_tr < 0.001 /*&& RAMP_FINISHED == 1*/){
 
 	  	                					delay_tr_freq = (int)(1/delay_tr);
@@ -643,6 +652,7 @@ int main(void)
 	  	                						delay_tr_freq_ACC = delay_tr_freq;
 	  	                					}
 	  	                				}
+
 	  	                				if(/*once == 0 output_vol> 47000 && RAMP_FINISHED == 1 */ imax1 > 0 /*&& output_vol> 47000 */ ){
 
 	  	            	  	                		delay_hc = (float)(((float)C_CAP*output_vol) * (float)(1/(float)imax1));
@@ -667,7 +677,7 @@ int main(void)
 
 
 
-	  	                				imax2 =  imax1 + imax2_sum;//
+	  	                				imax2 =  imax1 ;//+ imax2_sum;//
 
 	  	                				if(once == 0){
 	  	                					HAL_Delay(500);
@@ -721,6 +731,7 @@ int main(void)
 						once = 0;
 	  	            	imax1 = 1;
 						imax2 = 1;
+						imax2_sum = 1;
 						vout = 1;
 						Vramp = 1;
 						delay_tr = 1;
@@ -1895,6 +1906,7 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 {
 	if (hadc->Instance == ADC5)
 		    {
+				if(flag_control){
 		        uint32_t sum = 0;
 		        for (int i = 0; i < MA_WINDOW_SIZE; i++)
 		        {
@@ -1904,7 +1916,7 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 		        imax2_sum=(adc_moving_average-1450)*0.384;
 		        if(imax2_sum<-1000) imax2_sum = -1000;
 		        if(imax2_sum>1000) imax2_sum = 1000;
-
+				}
 		       // adc5_data_ready = 1; // Set flag to indicate new data is ready
 
 		        // Restart the DMA transfer
@@ -2017,8 +2029,8 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
 		//current_sensor1_vref = adc3_dma_buffer[0]*3300/4096;//(Low_pass_filter(adc3_dma_buffer[0], pcb_temp)/4096)*3.3;
 		//current_sensor2_vref = adc3_dma_buffer[1]*3300/4096;//(Low_pass_filter(adc3_dma_buffer[1], pcb_temp)/4096)*3.3;
 
-		input_voltage = (int)((((adc3_dma_buffer[2])*3300)/4096-200)*18.81);//[mV]		((Low_pass_filter(adc3_dma_buffer[2], input_voltage)/4096)*3.3-0.2)*27.1;
-		output_voltage = (int)((((adc4_dma_buffer[1])*3300)/4096-200)*18.81);//[mV] 		((Low_pass_filter(adc4_dma_buffer, output_voltage)/4096)*3.3-0.2)*27.1;
+		input_voltage = (int)((((adc3_dma_buffer[2])*0.8056)-200)*18.81);//[mV]		((Low_pass_filter(adc3_dma_buffer[2], input_voltage)/4096)*3.3-0.2)*27.1;
+		output_voltage = (int)((((adc4_dma_buffer[1])*0.8056)-200)*18.81);//[mV] 		((Low_pass_filter(adc4_dma_buffer, output_voltage)/4096)*3.3-0.2)*27.1;
 
 		//imax2_sum = //(adc_moving_average-1450)*0.384; //[mA] 0.20V - -0.5A || 1.45v - 0A || 2.77V - 0.5A		0.384 A/V
 		/*Gv = (float)output_voltage/(float)input_voltage;//output_voltage/input_voltage;
@@ -2141,9 +2153,9 @@ void regulatorPI(int32_t *out, int32_t *integral, int32_t in, int32_t in_zad, in
     {
         *out = limn;
     }
-   // if((*out - prev_out) < 50 || (*out - prev_out) < -50) // histeresis to probably prevent jitter must be checked
-   // {
-    //	*out = prev_out;
+   // if(abs((*out - prev_out)) <= 50) // histeresis to probably prevent jitter must be checked
+  //  {
+   // 	*out = prev_out;
    // }
 }
 
