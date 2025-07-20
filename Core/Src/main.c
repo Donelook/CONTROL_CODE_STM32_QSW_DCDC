@@ -618,8 +618,8 @@ int main(void)
 
 
 	  	                		  	  	Gv = (float)output_vol/(float)input_vol;//output_voltage/input_voltage;
-	  	                		  	  	if(abs(Gv-Gv_prev)>=0.02)
-	  	                		  	  	{
+	  	                		  	  	//if(abs(Gv-Gv_prev)>=0.02)
+	  	                		  	  	//{
 	  	                				if(Gv<2) //CZARY
 	  	                				{
 
@@ -639,8 +639,8 @@ int main(void)
 	  	                					delay_tr = (M_PI-approx_acos2((1/(Gv-1)))) * INV_wr;
 	  	                					imin = 0;
 	  	                				}
-	  	                		  	  	}
-	  	                		  		Gv_prev = Gv;
+	  	                		  	  	//}
+	  	                		  		//Gv_prev = Gv;
 	  	                				if(/*once == 0*/delay_tr < 0.001 /*&& RAMP_FINISHED == 1*/){
 
 	  	                					delay_tr_freq = (int)(1/delay_tr);
@@ -680,7 +680,7 @@ int main(void)
 	  	                				imax2 =  imax1 ;//+ imax2_sum;//
 
 	  	                				if(once == 0){
-	  	                					HAL_Delay(500);
+	  	                					//HAL_Delay(500);
 	  	                					HAL_GPIO_WritePin(START_STOP_FPGA_GPIO_Port, START_STOP_FPGA_Pin, 1); // START FPGA DANCE
 	  	                					once = 1;
 	  	                				}
