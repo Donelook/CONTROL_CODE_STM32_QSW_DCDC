@@ -73,6 +73,8 @@ void Error_Handler(void);
 #define DEADTIME_TR_GPIO_Port GPIOC
 #define INTERLOCK_Pin GPIO_PIN_2
 #define INTERLOCK_GPIO_Port GPIOC
+#define OUTPUT_COTROL_Pin GPIO_PIN_3
+#define OUTPUT_COTROL_GPIO_Port GPIOC
 #define RESET_FPGA_Pin GPIO_PIN_2
 #define RESET_FPGA_GPIO_Port GPIOF
 #define IMAX_Pin GPIO_PIN_4

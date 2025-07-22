@@ -53,15 +53,15 @@ typedef enum {
 #define MA_WINDOW_SIZE 10  		// Moving average window
 #define BUFFER_SIZE 100  		// Buffer size for DAC test - not used in final program
 #define res12_b 4096
-#define L_IND 0.000094  	// 94uH
+#define L_IND 0.000094  		// 94uH
 #define C_CAP 0.0000000044 		// 4.4nF
 #define wr 1554926				//	1/sqrt(L_IND*C_CAP)	- Omega of LC resonance
 #define INV_wr 0.0000006431		//	1/wr
-#define Z 146.16304718				//sqrt(L_IND/(2*C_CAP)) // impedance of inductor and two capacitor on Dren-Source MOSFETs
+#define Z 146.16304718			//sqrt(L_IND/(2*C_CAP)) // impedance of inductor and two capacitor on Dren-Source MOSFETs
 #define INV_Z 0.0068416745		// 1/Z
 #define Ts 0.00005				// Sampling rate of control loop 20khz
-#define ALPHA 0.1 // smoothing factor 0-1
-
+#define ALPHA 0.1 				// smoothing factor 0-1
+#define OUTPUT_TOLERANCE 0.02
 #define LUT_SIZE 256
 
 // fixed point format
@@ -334,6 +334,7 @@ uint32_t input_vol_x_n1 = 1;
 uint32_t input_vol_y_n1 = 1;
 uint32_t output_vol_x_n1 = 1;
 uint32_t output_vol_y_n1 = 1;
+uint32_t output_vol_ACC = 21000;
 
 
 // Convert float to Q8.24 fixed-point
@@ -610,12 +611,13 @@ int main(void)
 	  	                	  {
 	  	                		// start_ticks = SysTick->VAL;
 
+
 	  	                		  	  	input_vol = (int32_t)Low_pass_filter(input_voltage, input_vol, input_vol_x_n1, input_vol_y_n1); //input_voltage;
 	  	                		  	  	output_vol = (int32_t)Low_pass_filter(output_voltage, output_vol, output_vol_x_n1, output_vol_y_n1); //output_voltage;
 	  	                		  	  	 //yfilter[1] = a*yfilter[];
+	  	                		  	  	float rel_output_voltage_error = abs(((float)(output_vol - vref)/(float)vref));
 
-
-
+	  	                		  	  	if(rel_output_voltage_error > OUTPUT_TOLERANCE || RAMP_FINISHED  == 0){
 
 	  	                		  	  	Gv = (float)output_vol/(float)input_vol;//output_voltage/input_voltage;
 	  	                		  	  	//if(abs(Gv-Gv_prev)>=0.02)
@@ -671,21 +673,24 @@ int main(void)
 	  	                					  	    delay_hc_freq_ACC = delay_hc_freq;
 	  	                					  	   }
 	  	                				}
-	  	                				if(RAMP_FINISHED == 0) Vramp = RAMP(Vramp, vref, 160000, Ts); // Adding to Vramp stepping voltage to create starting ramp
+	  	                				if(RAMP_FINISHED == 0) Vramp = RAMP(Vramp, vref, 160000, Ts); // Adding to Vramp stepping voltage to create starting ramp  21 07 2025 was 160000 rate
 
 	  	                				if (Vramp > 0 ) regulatorPI(&imax1, &Integral_I, output_vol, Vramp, LIM_PEAK_POS, LIM_PEAK_NEG, Kp, Ti, Ts);
 
 
 
-	  	                				imax2 =  imax1 ;//+ imax2_sum;//
+	  	                				imax2 =  imax1 ;// + imax2_sum;//
 
 	  	                				if(once == 0){
 	  	                					//HAL_Delay(500);
 	  	                					HAL_GPIO_WritePin(START_STOP_FPGA_GPIO_Port, START_STOP_FPGA_Pin, 1); // START FPGA DANCE
 	  	                					once = 1;
 	  	                				}
-
+	  	                		  	  	}
+	  	                		  	  	else
+	  	                		  	  	{
 	  	                				flag_control = 0;
+	  	                		  	  	}
 
 	  	                	  }
 
@@ -1703,10 +1708,10 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(CS_OCD_2_GPIO_Port, CS_OCD_2_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(RESET_FPGA_GPIO_Port, RESET_FPGA_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOC, OUTPUT_COTROL_Pin|START_STOP_FPGA_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(START_STOP_FPGA_GPIO_Port, START_STOP_FPGA_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(RESET_FPGA_GPIO_Port, RESET_FPGA_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOE, NOT_RST_2_Pin|CS_OCD_1_Pin, GPIO_PIN_SET);
@@ -1752,19 +1757,19 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
+  /*Configure GPIO pins : OUTPUT_COTROL_Pin START_STOP_FPGA_Pin */
+  GPIO_InitStruct.Pin = OUTPUT_COTROL_Pin|START_STOP_FPGA_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
   /*Configure GPIO pin : RESET_FPGA_Pin */
   GPIO_InitStruct.Pin = RESET_FPGA_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(RESET_FPGA_GPIO_Port, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : START_STOP_FPGA_Pin */
-  GPIO_InitStruct.Pin = START_STOP_FPGA_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(START_STOP_FPGA_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : READY_2_Pin */
   GPIO_InitStruct.Pin = READY_2_Pin;
@@ -2076,7 +2081,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
 		//HAL_GPIO_WritePin(START_STOP_FPGA_GPIO_Port, START_STOP_FPGA_Pin, 1); // START FPGA DANCE
 		//once = 1;
 		//}
-
+		HAL_GPIO_TogglePin(OUTPUT_COTROL_GPIO_Port, OUTPUT_COTROL_Pin);
 		//sythick2 =  HAL_GetTick() - sythick1;
 		flag_control = 1;
 	}
@@ -2135,7 +2140,6 @@ void regulatorPI(int32_t *out, int32_t *integral, int32_t in, int32_t in_zad, in
     delta = in_zad - in; // error
     *integral = (*integral + (int32_t)((delta + prev_delta) * ((kp / ti) * Ts1 * 0.5f))) ; // I part
     prev_delta = delta;
-    prev_out = *out;
     if (*integral >= limp) // limit peak positive
     {
         *integral = limp;
@@ -2144,7 +2148,7 @@ void regulatorPI(int32_t *out, int32_t *integral, int32_t in, int32_t in_zad, in
     {
         *integral = limn;
     }
-    *out = ((int32_t)((float)delta*kp) + *integral); // Sum of P and I
+    *out = (int32_t)(delta*kp + *integral); // Sum of P and I
     if (*out >= limp) // limit peak positive
     {
         *out = limp;
@@ -2153,6 +2157,7 @@ void regulatorPI(int32_t *out, int32_t *integral, int32_t in, int32_t in_zad, in
     {
         *out = limn;
     }
+   // prev_out = *out;
    // if(abs((*out - prev_out)) <= 50) // histeresis to probably prevent jitter must be checked
   //  {
    // 	*out = prev_out;
