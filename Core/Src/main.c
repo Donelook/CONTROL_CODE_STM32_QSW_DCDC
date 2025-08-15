@@ -615,7 +615,7 @@ int main(void)
 	  	                		  	  	input_vol = (int32_t)Low_pass_filter(input_voltage, input_vol, input_vol_x_n1, input_vol_y_n1); //input_voltage;
 	  	                		  	  	output_vol = (int32_t)Low_pass_filter(output_voltage, output_vol, output_vol_x_n1, output_vol_y_n1); //output_voltage;
 	  	                		  	  	 //yfilter[1] = a*yfilter[];
-	  	                		  	  	float rel_output_voltage_error = abs(((float)(output_vol - vref)/(float)vref));
+	  	                		  	  	float rel_output_voltage_error = fabs(((float)(output_vol - vref)/(float)vref));
 
 	  	                		  	  	if(rel_output_voltage_error > OUTPUT_TOLERANCE || RAMP_FINISHED  == 0){
 
@@ -679,7 +679,7 @@ int main(void)
 
 
 
-	  	                				imax2 =  imax1 ;// + imax2_sum;//
+	  	                				imax2 =  imax1;  //+ imax2_sum;//
 
 	  	                				if(once == 0){
 	  	                					//HAL_Delay(500);
@@ -689,6 +689,7 @@ int main(void)
 	  	                		  	  	}
 	  	                		  	  	else
 	  	                		  	  	{
+
 	  	                				flag_control = 0;
 	  	                		  	  	}
 
@@ -2071,7 +2072,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
 		imax2 = imax1 + imax2_sum; // imax2_sum signal from FPGA
 		// imax1,2 each for branches to make 180 degree shift*/
 		HAL_DAC_SetValue(&hdac1, DAC_CHANNEL_1, DAC_ALIGN_12B_R, current_sensor1_vref+((int32_t)imax1*0.025)); // imax1  1.5V is 0A;  1A is 20mV; 1 bit is 0.8mV; imax[mA]*0.02 [V/A]/0.8[mV] = Value for DAC
-		HAL_DAC_SetValue(&hdac1, DAC_CHANNEL_2, DAC_ALIGN_12B_R, current_sensor2_vref+((int32_t)imax2*0.025)); // imax2
+		HAL_DAC_SetValue(&hdac1, DAC_CHANNEL_2, DAC_ALIGN_12B_R, current_sensor2_vref+((int32_t)imax1*0.025)); // imax2
 		HAL_DAC_SetValue(&hdac2, DAC_CHANNEL_1, DAC_ALIGN_12B_R, current_sensor1_vref-((int32_t)imin*0.25)); // imin uzyto tutaj wzmacniacza 10x dla sygnalu z sensora pradu wiec ma wzmocnienie 200mv/A a nie 20mv/a
 
 		}
