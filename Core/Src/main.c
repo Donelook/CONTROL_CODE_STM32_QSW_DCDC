@@ -55,8 +55,8 @@ typedef enum {
 #define res12_b 4096
 #define L_IND 0.000094  		// 94uH
 #define C_CAP 0.0000000044 		// 4.4nF
-#define wr 1554926				//	1/sqrt(L_IND*C_CAP)	- Omega of LC resonance
-#define INV_wr 0.0000006431		//	1/wr
+#define wr 1554926				//	1/sqrt(L_IND*C_CAP)	- Omega of LC resonance  wr 1256637
+#define INV_wr 0.0000006431		//	1/wr INV_wr 0.0000007957
 #define Z 146.16304718			//sqrt(L_IND/(2*C_CAP)) // impedance of inductor and two capacitor on Dren-Source MOSFETs
 #define INV_Z 0.0068416745		// 1/Z
 #define Ts 0.00005				// Sampling rate of control loop 20khz
@@ -241,7 +241,7 @@ uint16_t adc3_moving_average[5][MA_WINDOW_SIZE];
  * 3 - PCB temperature (MCP9700)
  * 4 - Heatsink Temprature (TMP236)
  */
-int32_t vref = 48000; 			//[mV]  Reference voltage its compare to output voltage
+int32_t vref = 50000; 			//[mV]  Reference voltage its compare to output voltage
 //uint32_t step_size = 2000;
 int32_t output_voltage = 21000; 	// Measured voltage 0.2V BIAS
 int32_t vout = 21000; 				//Voltage comparing to vref
@@ -253,6 +253,8 @@ uint8_t RAMP_FINISHED = 0;
 void regulatorPI(int32_t *out, int32_t *integral, int32_t in, int32_t in_zad, int32_t limp, int32_t limn, float kp, float ti, float Ts1);
 int32_t prev_out;
 int32_t delta;
+float delay_tr_factor = 1.4;
+float delay_hc_factor = 1.05;
 float delay_tr = 1e-7; // DELAY/DEADTIME after first stage inductor  positive ramp
 float delay_hc = 1e-7; // DELAY/DEADTIME after second stage inductor negative ramp
 int delay_tr_freq = 1000000;
@@ -304,7 +306,7 @@ volatile uint8_t dataReceivedFlag = 0; // Flags to indicate new data received
 //Regulator PI of voltage
 float Kp = 0.01; 			// Proportional part of PI
 float Ti = 5e-5; 			// Integral part of PI
-int32_t LIM_PEAK_POS = 8000; 	// Positive limit for PI regulator [mA]
+int32_t LIM_PEAK_POS = 12000; 	// Positive limit for PI regulator [mA]
 int32_t LIM_PEAK_NEG = 0; 	// Negative limit for PI regulator [mA]
 int32_t Integral_I = 0;		// Integral part of PI
 int32_t prev_delta = 0; 		// buffer  error n-1
@@ -625,7 +627,7 @@ int main(void)
 	  	                				if(Gv<2) //CZARY
 	  	                				{
 
-	  	                					delay_tr = approx_acos2((1-Gv))*INV_wr;
+	  	                					delay_tr = (approx_acos2((1-Gv))*INV_wr)*delay_tr_factor;
 	  	                					 // start_ticks = SysTick->VAL;
 
 	  	                					cordic_input = float_to_integer(((2-Gv)/Gv), 100, 32);
@@ -638,7 +640,7 @@ int main(void)
 	  	                					if(imin>4000) imin = 4000;
 	  	                				} else if(Gv >= 2)
 	  	                				{
-	  	                					delay_tr = (M_PI-approx_acos2((1/(Gv-1)))) * INV_wr;
+	  	                					delay_tr = ((M_PI-approx_acos2((1/(Gv-1)))) * INV_wr)*delay_tr_factor;
 	  	                					imin = 0;
 	  	                				}
 	  	                		  	  	//}
@@ -657,7 +659,7 @@ int main(void)
 
 	  	                				if(/*once == 0 output_vol> 47000 && RAMP_FINISHED == 1 */ imax1 > 0 /*&& output_vol> 47000 */ ){
 
-	  	            	  	                		delay_hc = (float)(((float)C_CAP*output_vol) * (float)(1/(float)imax1));
+	  	            	  	                		delay_hc = (float)((((float)C_CAP*output_vol) * (float)(1/(float)imax1))*delay_hc_factor);
 	  	                					  	    delay_hc_freq = (int)(1/delay_hc);
 
 	  	                					  	   if(delay_hc_freq>20000000) delay_hc_freq = 20000000;//10Mhz jakis problem
@@ -1877,7 +1879,7 @@ ConverterState handle_event(ConverterState currentState, ConverterEvent event) {
         default:
             break;
     }
-    return currentState; // No state change
+      return currentState; // No state change
 }
 
 
