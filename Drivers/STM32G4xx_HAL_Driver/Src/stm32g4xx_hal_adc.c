@@ -3666,7 +3666,7 @@ void ADC_DMAConvCplt(DMA_HandleTypeDef *hdma)
   * @retval None
   */
 void ADC_DMAHalfConvCplt(DMA_HandleTypeDef *hdma)
-{
+ {
   /* Retrieve ADC handle corresponding to current DMA handle */
   ADC_HandleTypeDef *hadc = (ADC_HandleTypeDef *)((DMA_HandleTypeDef *)hdma)->Parent;
 
