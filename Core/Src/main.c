@@ -584,8 +584,6 @@ int main(void)
 	  	            	  if(start_program && interlock &&  !(checkfaults)   && checkreads){
 	  	            		  currentState = STATE_REGULATION;//STATE_SOFT_START;
 
-	  	            		input_voltage = (int)((((adc3_dma_buffer[2])*0.8056)-200)*555.55);//[mV]18.81		((Low_pass_filter(adc3_dma_buffer[2], input_voltage)/4096)*3.3-0.2)*27.1;
-	  	            				output_voltage = (int)((((adc4_dma_buffer[1])*0.8056)-200)*555.55);
 		  	            	  /*if(once == 0){
 		  	            	  //Start timer that start_program ramp and pi regulation
 		  	            	HAL_GPIO_WritePin(RESET_FPGA_GPIO_Port, RESET_FPGA_Pin, 0); // RESET =  0  = reset turn off
@@ -2039,8 +2037,8 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
 		//current_sensor1_vref = adc3_dma_buffer[0]*3300/4096;//(Low_pass_filter(adc3_dma_buffer[0], pcb_temp)/4096)*3.3;
 		//current_sensor2_vref = adc3_dma_buffer[1]*3300/4096;//(Low_pass_filter(adc3_dma_buffer[1], pcb_temp)/4096)*3.3;
 
-		input_voltage = (uint32_t)(((adc3_dma_buffer[2]*0.8058)-194)*322);//[mV]18.81		((Low_pass_filter(adc3_dma_buffer[2], input_voltage)/4096)*3.3-0.2)*27.1;
-		output_voltage = (uint32_t)((((adc4_dma_buffer[1])*0.8058)-182)*322);//[mV]18.81 		((Low_pass_filter(adc4_dma_buffer, output_voltage)/4096)*3.3-0.2)*27.1;
+		input_voltage = (uint32_t)((((adc3_dma_buffer[2]-240)*0.8058))*316);//[mV]18.81	-194	((Low_pass_filter(adc3_dma_buffer[2], input_voltage)/4096)*3.3-0.2)*27.1;
+		output_voltage = (uint32_t)((((adc4_dma_buffer[1]-238)*0.8058))*378);//[mV]18.81 -182 		((Low_pass_filter(adc4_dma_buffer, output_voltage)/4096)*3.3-0.2)*27.1;
 
 		//imax2_sum = //(adc_moving_average-1450)*0.384; //[mA] 0.20V - -0.5A || 1.45v - 0A || 2.77V - 0.5A		0.384 A/V
 		/*Gv = (float)output_voltage/(float)input_voltage;//output_voltage/input_voltage;
