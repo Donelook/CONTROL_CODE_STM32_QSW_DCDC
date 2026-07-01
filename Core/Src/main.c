@@ -225,7 +225,7 @@ uint16_t current_sensor2_vref = 0; // 1.5V - 0 A
 int32_t imax1 = 0;
 int32_t imax2 = 0;
 uint32_t imin = 0;
-uint32_t input_voltage = 0; 		// 0.2V BIAS
+volatile uint32_t input_voltage = 0; 		// 0.2V BIAS
 uint32_t pcb_temp = 0;				// Temperature of PCB
 uint32_t heat_sink_temp = 0; 		// Temperature of heatsink
 void FAN_Drive();
@@ -241,20 +241,20 @@ uint16_t adc3_moving_average[5][MA_WINDOW_SIZE];
  * 3 - PCB temperature (MCP9700)
  * 4 - Heatsink Temprature (TMP236)
  */
-uint32_t vref = 50000; 			//[mV]  Reference voltage its compare to output voltage
+uint32_t vref = 49000; 			//[mV]  Reference voltage its compare to output voltage
 //uint32_t step_size = 2000;
-uint32_t output_voltage = 21000; 	// Measured voltage 0.2V BIAS
-int32_t vout = 21000; 				//Voltage comparing to vref
-int32_t Vramp = 21000; 			// ramp voltage
+volatile uint32_t output_voltage = 1; 	// Measured voltage 0.2V BIAS
+int32_t vout = 1; 				//Voltage comparing to vref
+int32_t Vramp = 1; 			// ramp voltage
 volatile static uint16_t adc4_dma_buffer[2];
 volatile static uint16_t adc4_measurments;
 int32_t RAMP(int32_t Vout, int32_t Vref, int32_t Ramp_ratio, float period_loop);
-uint8_t RAMP_FINISHED = 0;
+volatile uint8_t RAMP_FINISHED = 0;
 void regulatorPI(int32_t *out, int32_t *integral, int32_t in, int32_t in_zad, int32_t limp, int32_t limn, float kp, float ti, float Ts1);
 int32_t prev_out;
 int32_t delta;
-float delay_tr_factor = 1.4;
-float delay_hc_factor = 1.05;
+float delay_tr_factor = 1.0;
+float delay_hc_factor = 1.0;
 float delay_tr = 1e-7; // DELAY/DEADTIME after first stage inductor  positive ramp
 float delay_hc = 1e-7; // DELAY/DEADTIME after second stage inductor negative ramp
 int delay_tr_freq = 1000000;
@@ -274,7 +274,7 @@ float b[2] = {0.13575525, 0.13575525};
 float a = 0.7284895;
 float yfilter[2] = {1,1};
 //Simple low pass filter
-float Low_pass_filter(float new_sample, float old_sample, float old_sample_n1, float old_passed);
+float Low_pass_filter(float new_sample, float old_sample);
 
 
 /* ADC4_MEASRUMENTS[X]
@@ -304,9 +304,11 @@ volatile uint8_t dataReceivedFlag = 0; // Flags to indicate new data received
 
 
 //Regulator PI of voltage
-float Kp = 0.01; 			// Proportional part of PI
-float Ti = 5e-5; 			// Integral part of PI
-int32_t LIM_PEAK_POS = 12000; 	// Positive limit for PI regulator [mA]
+float Kp = 0.06f; 			// Proportional part of PI
+float Ti = 0.005f; 			// Integral part of PI
+int32_t LIM_PEAK_STARTUP = 6000;  // 5 A
+int32_t LIM_PEAK_NORMAL  = 8000; // 12 A
+int32_t LIM_PEAK_POS = 8000; 	// Positive limit for PI regulator [mA]
 int32_t LIM_PEAK_NEG = 0; 	// Negative limit for PI regulator [mA]
 int32_t Integral_I = 0;		// Integral part of PI
 int32_t prev_delta = 0; 		// buffer  error n-1
@@ -329,9 +331,9 @@ int once = 0;
 uint8_t interlock = 0;
 uint32_t sythick1 = 0;
 uint32_t sythick2 = 0;
-uint8_t flag_control = 0;
-uint32_t input_vol = 21000;
-uint32_t output_vol = 21000;
+volatile uint8_t flag_control = 0;
+volatile uint32_t input_vol = 1;
+volatile uint32_t output_vol = 1;
 uint32_t input_vol_x_n1 = 1;
 uint32_t input_vol_y_n1 = 1;
 uint32_t output_vol_x_n1 = 1;
@@ -388,7 +390,7 @@ int main(void)
   /* MCU Configuration--------------------------------------------------------*/
 
   /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
-  HAL_Init();
+    HAL_Init();
 
   /* USER CODE BEGIN Init */
 
@@ -569,6 +571,8 @@ int main(void)
 
 	  	            	Set_PWM_DutyCycle(20);
 
+	  	            	HAL_Delay(50);
+
 	  	            	current_sensor1_vref = adc3_dma_buffer[0];// reference for imax imin
 	  	            	current_sensor2_vref = adc3_dma_buffer[1];// reference for imax imin
 
@@ -604,6 +608,11 @@ int main(void)
 	  	                  {
 	  	                	if(once == 0){
 	  	                		//Start timer that start_program ramp and pi regulation
+	  	                		Vramp = output_voltage;
+	  	                		    RAMP_FINISHED = 0;
+	  	                		    Integral_I = 0;
+	  	                		    prev_delta = 0;
+
 	  	                		HAL_GPIO_WritePin(RESET_FPGA_GPIO_Port, RESET_FPGA_Pin, 0); // RESET =  0  = reset turn off
 	  	                		HAL_TIM_Base_Start_IT(&htim15); // START TIM15 THATS IS MAIN CONTROL LOOP
 	  	                		HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
@@ -613,9 +622,9 @@ int main(void)
 	  	                	  {
 	  	                		// start_ticks = SysTick->VAL;
 
-
-	  	                		  	  	input_vol = (int32_t)Low_pass_filter(input_voltage, input_vol, input_vol_x_n1, input_vol_y_n1); //input_voltage;
-	  	                		  	  	output_vol = (int32_t)Low_pass_filter(output_voltage, output_vol, output_vol_x_n1, output_vol_y_n1); //output_voltage;
+	  	                		  	  	  flag_control = 0;
+	  	                		  	  	input_vol = (int32_t)Low_pass_filter(input_voltage, input_vol); //input_voltage;
+	  	                		  	  	output_vol = (int32_t)Low_pass_filter(output_voltage, output_vol); //output_voltage;
 	  	                		  	  	 //yfilter[1] = a*yfilter[];
 	  	                		  	  	float rel_output_voltage_error = fabs(((float)(output_vol - vref)/(float)vref));
 
@@ -629,7 +638,8 @@ int main(void)
 
 	  	                					delay_tr = (approx_acos2((1-Gv))*INV_wr)*delay_tr_factor;
 	  	                					 // start_ticks = SysTick->VAL;
-
+	  	                					//if(RAMP_FINISHED)
+	  	                						  	                				//	{
 	  	                					cordic_input = float_to_integer(((2-Gv)/Gv), 100, 32);
 	  	                					HAL_CORDIC_Calculate(&hcordic, &cordic_input, &result_q31, 1, 100);//sqrt((2-Gv)/Gv))
 	  	                					resultcordic = integer_to_float(result_q31, 10, 1, 32); // result of sqrt((((2-Gv)/Gv)) ) in float
@@ -638,6 +648,7 @@ int main(void)
 	  	                					imin = (int)(Imin_Factor*output_vol*resultcordic*INV_Z); //[mA] Negative current needed to Zero voltage switching in resonance
 
 	  	                					if(imin>4000) imin = 4000;
+	  	                					//}
 	  	                				} else if(Gv >= 2)
 	  	                				{
 	  	                					delay_tr = ((M_PI-approx_acos2((1/(Gv-1)))) * INV_wr)*delay_tr_factor;
@@ -652,7 +663,7 @@ int main(void)
 	  	                					if(delay_tr_freq>20000000) delay_tr_freq = 20000000;//10Mhz
 
 	  	                					if(abs(delay_tr_freq_ACC-delay_tr_freq) >= 20000) {
-	  	                						if(RAMP_FINISHED == 0) Update_PWM_Frequency(&htim1, TIM_CHANNEL_1, delay_tr_freq); // Set TIM1 CH1 to freq that is delay tr and send to fpga
+	  	                						 Update_PWM_Frequency(&htim1, TIM_CHANNEL_1, delay_tr_freq); // Set TIM1 CH1 to freq that is delay tr and send to fpga
 	  	                						delay_tr_freq_ACC = delay_tr_freq;
 	  	                					}
 	  	                				}
@@ -669,13 +680,21 @@ int main(void)
 
 	  	                					  	     Update_PWM_Frequency(&htim8, TIM_CHANNEL_2, delay_hc_freq); // Set TIM8 CH1 o freq that is delay hc and send to fpga
 
-	  	                					  	    stop_ticks = SysTick->VAL;
-	  	                					  	    elapsed_ticks = start_ticks-stop_ticks;
+	  	                					  	   // stop_ticks = SysTick->VAL;
+	  	                					  	  //  elapsed_ticks = start_ticks-stop_ticks;
 
 	  	                					  	    delay_hc_freq_ACC = delay_hc_freq;
 	  	                					  	   }
 	  	                				}
-	  	                				if(RAMP_FINISHED == 0) Vramp = RAMP(Vramp, vref, 160000, Ts); // Adding to Vramp stepping voltage to create starting ramp  21 07 2025 was 160000 rate
+	  	                				if(RAMP_FINISHED == 0)
+	  	                				{
+	  	                					Vramp = RAMP(Vramp, vref, 40000, Ts); //160000 Adding to Vramp stepping voltage to create starting ramp  21 07 2025 was 160000 rate
+	  	                					LIM_PEAK_POS = LIM_PEAK_STARTUP;
+	  	                				}
+	  	                				else
+	  	                				{
+	  	                					LIM_PEAK_POS = LIM_PEAK_NORMAL;
+	  	                				}
 
 	  	                				if (Vramp > 0 ) regulatorPI(&imax1, &Integral_I, output_vol, Vramp, LIM_PEAK_POS, LIM_PEAK_NEG, Kp, Ti, Ts);
 
@@ -733,31 +752,35 @@ int main(void)
 	  	              {
 	  	            	HAL_GPIO_WritePin(START_STOP_FPGA_GPIO_Port, START_STOP_FPGA_Pin, GPIO_PIN_RESET);
 	  	            	HAL_GPIO_WritePin(RESET_FPGA_GPIO_Port, RESET_FPGA_Pin, 1); // RESET =  1  = reset turn on IMPORTANT!! WAZNE!!!
-	  	            	HAL_TIM_Base_Stop_IT(&htim15);
+	  	            	//HAL_TIM_Base_Stop_IT(&htim15);
 	  	            	//HAL_GPIO_WritePin(RESET_FPGA_GPIO_Port, RESET_FPGA_Pin, 0); // RESET =  1  = reset turn on IMPORTANT!! WAZNE!!!
+	  	            	HAL_TIM_Base_Stop_IT(&htim15);
+	  	            	flag_control = 0;
+
 	  	            	RAMP_FINISHED = 0;
 						once = 0;
 	  	            	imax1 = 1;
 						imax2 = 1;
 						imax2_sum = 1;
-						vout = 1;
-						Vramp = 1;
-						delay_tr = 1;
-						delay_hc = 1;
-						Gv = 1;
-						Integral_I = 1;
-						prev_delta = 1;
-						input_vol = 1;
-						input_voltage =1;
-						output_vol = 1;
-						output_voltage =1;
-						input_vol_x_n1 = 1;
-						input_vol_y_n1 = 1;
-						output_vol_x_n1 = 1;
-						output_vol_y_n1 = 1;
+						//vout = 1;
+						//Vramp = 1;
+						delay_tr = 1.0f;
+						delay_hc = 1.0f;
+						Gv = 1.0f;
+						Integral_I = 0;
+						prev_delta = 0;
+						//input_vol = 1;
+						//input_voltage =1;
+						//output_vol = 1;
+						//output_voltage =1;
+						//input_vol_x_n1 = 1;
+						//input_vol_y_n1 = 1;
+						//output_vol_x_n1 = 1;
+						//output_vol_y_n1 = 1;
 						imin = 1;
 						HAL_TIM_PWM_Stop(&htim8, TIM_CHANNEL_2);
 						HAL_TIM_PWM_Stop(&htim1, TIM_CHANNEL_1);
+
 	  	            	currentState = STATE_STANDBY;
 	  	              }
 
@@ -2037,7 +2060,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
 		//current_sensor1_vref = adc3_dma_buffer[0]*3300/4096;//(Low_pass_filter(adc3_dma_buffer[0], pcb_temp)/4096)*3.3;
 		//current_sensor2_vref = adc3_dma_buffer[1]*3300/4096;//(Low_pass_filter(adc3_dma_buffer[1], pcb_temp)/4096)*3.3;
 
-		input_voltage = (uint32_t)((((adc3_dma_buffer[2]-240)*0.8058))*316);//[mV]18.81	-194	((Low_pass_filter(adc3_dma_buffer[2], input_voltage)/4096)*3.3-0.2)*27.1;
+		input_voltage = (uint32_t)((((adc3_dma_buffer[2]-240)*0.8058))*378);//[mV]18.81	-194	 316 ((Low_pass_filter(adc3_dma_buffer[2], input_voltage)/4096)*3.3-0.2)*27.1;
 		output_voltage = (uint32_t)((((adc4_dma_buffer[1]-238)*0.8058))*378);//[mV]18.81 -182 		((Low_pass_filter(adc4_dma_buffer, output_voltage)/4096)*3.3-0.2)*27.1;
 
 		//imax2_sum = //(adc_moving_average-1450)*0.384; //[mA] 0.20V - -0.5A || 1.45v - 0A || 2.77V - 0.5A		0.384 A/V
@@ -2194,7 +2217,7 @@ void regulatorPI(int32_t *out, int32_t *integral, int32_t in, int32_t in_zad, in
 	    return y[0];
 }*/
 
-float Low_pass_filter(float new_sample, float old_sample, float old_sample_n1, float old_passed)
+float Low_pass_filter(float new_sample, float old_sample)
 {
 
 	//Low_passed_sample = (float)ALPHA * new_sample + (1.0 - ALPHA) * old_sample;
