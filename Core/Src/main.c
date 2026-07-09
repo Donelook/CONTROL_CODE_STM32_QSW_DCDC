@@ -253,8 +253,8 @@ volatile uint8_t RAMP_FINISHED = 0;
 void regulatorPI(int32_t *out, int32_t *integral, int32_t in, int32_t in_zad, int32_t limp, int32_t limn, float kp, float ti, float Ts1);
 int32_t prev_out;
 int32_t delta;
-float delay_tr_factor = 1.5;
-float delay_hc_factor = 1.2;
+float delay_tr_factor = 1.6;
+float delay_hc_factor = 1.45;
 float delay_tr = 1e-7; // DELAY/DEADTIME after first stage inductor  positive ramp
 float delay_hc = 1e-7; // DELAY/DEADTIME after second stage inductor negative ramp
 int delay_tr_freq = 10e6;
@@ -304,14 +304,33 @@ volatile uint8_t dataReceivedFlag = 0; // Flags to indicate new data received
 
 
 //Regulator PI of voltage
-float Kp = 0.06f; 			// Proportional part of PI
-float Ti = 0.005f; 			// Integral part of PI
-int32_t LIM_PEAK_STARTUP = 6000;  // 5 A
-int32_t LIM_PEAK_NORMAL  = 8000; // 12 A
-int32_t LIM_PEAK_POS = 8000; 	// Positive limit for PI regulator [mA]
+float Kp = 0.07f; 			// Proportional part of PI
+float Ti = 0.003f; 			// Integral part of PI
+int32_t LIM_PEAK_STARTUP = 2000;  // 5 A
+int32_t LIM_PEAK_NORMAL  = 10000; // 12 A
+int32_t LIM_PEAK_POS = 10000; 	// Positive limit for PI regulator [mA]
 int32_t LIM_PEAK_NEG = 0; 	// Negative limit for PI regulator [mA]
+int32_t LIM_INTEGRAL_I_POS = 8000;
+int32_t LIM_INTEGRAL_I_NEG = 0;
 int32_t Integral_I = 0;		// Integral part of PI
 int32_t prev_delta = 0; 		// buffer  error n-1
+static float Vramp_f = 0; // akumulator pełnej precyzji, persystentny między wywołaniami
+// --- Regulator PI przesuniecia fazowego (korekta IMAX2 na podstawie bledu
+// fazy zmierzonego w FPGA i odczytanego przez ADC5/PA8 jako imax2_sum) ---
+// UWAGA: regulatorPI() powyzej uzywa GLOBALNYCH zmiennych delta/prev_delta,
+// wiec NIE MOZNA jej wywolywac drugi raz dla niezaleznej petli (nadpisze
+// stan petli napiecia imax1). Dlatego ponizej reentrantna wersja z wlasnym
+// stanem, uzywana WYLACZNIE dla petli fazy - patrz regulatorPI_r().
+void regulatorPI_r(int32_t *out, int32_t *integral, int32_t *prev_delta_state,
+                    int32_t in, int32_t in_zad, int32_t limp, int32_t limn,
+                    float kp, float ti, float Ts1);
+float Kp_phase = 0.01f;        // PUNKT STARTOWY - do dostrojenia empirycznie na sprzecie (patrz opis metody)
+float Ti_phase = 0.02f;        // PUNKT STARTOWY - do dostrojenia empirycznie na sprzecie
+int32_t LIM_PHASE_POS = 3000;   // [mA] maks. korekta IMAX2 (~10% LIM_PEAK_NORMAL) - DO WERYFIKACJI:
+int32_t LIM_PHASE_NEG = -3000;  //  musi zostac tak dobrana, zeby nie rozbalansowac pradow miedzy galeziami
+int32_t Integral_phase = 0;
+int32_t prev_delta_phase = 0;
+int32_t phase_correction = 0;
 
 
 
@@ -390,7 +409,7 @@ int main(void)
   /* MCU Configuration--------------------------------------------------------*/
 
   /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
-   HAL_Init();
+    HAL_Init();
 
   /* USER CODE BEGIN Init */
 
@@ -612,10 +631,13 @@ int main(void)
 	  	                	if(once == 0)
 	  	                		{
 	  	                		//Start timer that start_program ramp and pi regulation
-	  	                		Vramp = output_voltage;
+	  	                		//Vramp = output_voltage;
 	  	                		    RAMP_FINISHED = 0;
 	  	                		    Integral_I = 0;
 	  	                		    prev_delta = 0;
+	  	                		    Integral_phase = 0;
+	  	                		    prev_delta_phase = 0;
+	  	                		 // Vramp_f = 1;
 	  	                		  delay_tr_freq = 10e6f;
 	  	                		  delay_hc_freq = 10e6f;
 	  	                		HAL_GPIO_WritePin(RESET_FPGA_GPIO_Port, RESET_FPGA_Pin, 0); // RESET =  0  = reset turn off
@@ -700,9 +722,14 @@ int main(void)
 	  	                		  	  	}
 	  	                				if(RAMP_FINISHED == 0)
 	  	                				{
+	  	                					if(once == 0){
+	  	                						Vramp_f = output_voltage + 5000;
+												Vramp = output_voltage + 5000;
+	  	                					}
 	  	                					if(once == 0) Update_PWM_Frequency(&htim8, TIM_CHANNEL_2, delay_tr_freq);
 	  	                					if(once == 0) Update_PWM_Frequency(&htim1, TIM_CHANNEL_1, delay_hc_freq);
-	  	                					Vramp = RAMP(Vramp, vref, 40000, Ts); //160000 Adding to Vramp stepping voltage to create starting ramp  21 07 2025 was 160000 rate
+
+	  	                					Vramp = RAMP(Vramp, vref, 10000, Ts); //160000 Adding to Vramp stepping voltage to create starting ramp  21 07 2025 was 160000 rate
 	  	                					LIM_PEAK_POS = LIM_PEAK_STARTUP;
 	  	                				}
 	  	                				else
@@ -714,10 +741,27 @@ int main(void)
 
 
 
-	  	                				//imax2 =  imax1;  //+ imax2_sum;//
+	  	                				// Korekta fazy galezi B (IMAX2) na podstawie bledu fazy zmierzonego
+	  	                				// w FPGA (S1 vs S3) i odczytanego przez ADC5/PA8 -> imax2_sum [mA].
+	  	                				// Wczesniej ta linia byla martwa (imax2 = imax1 bez korekty), a sam
+	  	                				// zapis do DAC uzywal imax1 zamiast imax2 - patrz poprawka w
+	  	                				//HAL_TIM_PeriodElapsedCallback (DAC_CHANNEL_2).
+	  	                				regulatorPI_r(&phase_correction, &Integral_phase, &prev_delta_phase,
+	  	                				             imax2_sum, 0, LIM_PHASE_POS, LIM_PHASE_NEG,
+	  	                				             Kp_phase, Ti_phase, Ts);
+	  	                				imax2 = imax1 + phase_correction;
 
 	  	                				if(once == 0){
-	  	                					HAL_Delay(100);
+	  	                					imax1 = LIM_PEAK_STARTUP;                 // ustaw limit PRZED startem
+	  	                					    HAL_DAC_SetValue(&hdac1, DAC_CHANNEL_1, DAC_ALIGN_12B_R,
+	  	                					                      current_sensor1_vref + (int32_t)(imax1*0.025));
+	  	                					    HAL_DAC_SetValue(&hdac1, DAC_CHANNEL_2, DAC_ALIGN_12B_R,
+	  	                					                      current_sensor2_vref + (int32_t)(imax1*0.025));
+
+	  	                					    // realne oczekiwanie na ustalenie analogu, nie 100ms "na czuja"
+	  	                					    // sprawdź na oscylo ile faktycznie trzeba i wstaw tu ten czas
+
+	  	                					HAL_Delay(50);
 	  	                					HAL_GPIO_WritePin(START_STOP_FPGA_GPIO_Port, START_STOP_FPGA_Pin, 1); // START FPGA DANCE
 	  	                					once = 1;
 	  	                				}
@@ -778,16 +822,20 @@ int main(void)
 						imax2_sum = 1;
 						//vout = 1;
 						//Vramp = 1;
+						Vramp_f = 1;
 						delay_tr = 1e6f;
 						delay_hc = 1e6f;
 						Gv = 1.0f;
 						Integral_I = 0;
 						prev_delta = 0;
-						//input_vol = 1;
-						//input_voltage =1;
-						//output_vol = 1;
-						//output_voltage =1;
-						//input_vol_x_n1 = 1;
+						Integral_phase = 0;
+						prev_delta_phase = 0;
+						phase_correction = 0;
+						input_vol = 1;
+						input_voltage =1;
+						output_vol = 1;
+						output_voltage =1;
+						//nput_vol_x_n1 = 1;
 						//input_vol_y_n1 = 1;
 						//output_vol_x_n1 = 1;
 						//output_vol_y_n1 = 1;
@@ -2111,7 +2159,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
 		imax2 = imax1 + imax2_sum; // imax2_sum signal from FPGA
 		// imax1,2 each for branches to make 180 degree shift*/
 		HAL_DAC_SetValue(&hdac1, DAC_CHANNEL_1, DAC_ALIGN_12B_R, current_sensor1_vref+((int32_t)imax1*0.025)); // imax1  1.5V is 0A;  1A is 20mV; 1 bit is 0.8mV; imax[mA]*0.02 [V/A]/0.8[mV] = Value for DAC
-		HAL_DAC_SetValue(&hdac1, DAC_CHANNEL_2, DAC_ALIGN_12B_R, current_sensor2_vref+((int32_t)imax1*0.025)); // imax2
+		HAL_DAC_SetValue(&hdac1, DAC_CHANNEL_2, DAC_ALIGN_12B_R, current_sensor2_vref+((int32_t)imax2*0.025)); // imax2 - POPRAWIONE: bylo imax1 (kopiuj-wklej z linii DAC_CHANNEL_1), przez co IMAX2 nigdy nie roznil sie od IMAX1
 		HAL_DAC_SetValue(&hdac2, DAC_CHANNEL_1, DAC_ALIGN_12B_R, current_sensor1_vref-((int32_t)imin*0.25)); //dano *10 dla testu imin uzyto tutaj wzmacniacza 10x dla sygnalu z sensora pradu wiec ma wzmocnienie 200mv/A a nie 20mv/a
 
 		}
@@ -2149,7 +2197,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
 
 }
 
-int32_t RAMP(int32_t Vout, int32_t Vref, int32_t Ramp_ratio, float period_loop)
+/*int32_t RAMP(int32_t Vout, int32_t Vref, int32_t Ramp_ratio, float period_loop)
 {
 	// RAMP Voltage to soft-start
 				if(((int32_t)Vref - (int32_t)Vout) > 10)
@@ -2170,6 +2218,29 @@ int32_t RAMP(int32_t Vout, int32_t Vref, int32_t Ramp_ratio, float period_loop)
 				}
 
 				return Vout;
+}*/
+
+int32_t RAMP(int32_t Vout, int32_t Vref, int32_t Ramp_ratio, float period_loop)
+{
+    if ((Vref - Vout) > 10)
+    {
+        Vramp_f += Ramp_ratio * period_loop; // przyrost akumulowany we float
+        Vout = (int32_t)Vramp_f;             // rzut na int tylko na wyjściu
+    }
+    else if ((Vref - Vout) < -10)
+    {
+        Vramp_f -= Ramp_ratio * period_loop;
+        Vout = (int32_t)Vramp_f;
+    }
+
+    if (Vout >= Vref - 50)
+    {
+        Vout = Vref;
+        Vramp_f = Vref;   // ważne: zsynchronizuj akumulator, żeby nie było skoku przy kolejnym starcie
+        RAMP_FINISHED = 1;
+    }
+
+    return Vout;
 }
 
 void regulatorPI(int32_t *out, int32_t *integral, int32_t in, int32_t in_zad, int32_t limp, int32_t limn, float kp, float ti, float Ts1)
@@ -2202,6 +2273,41 @@ void regulatorPI(int32_t *out, int32_t *integral, int32_t in, int32_t in_zad, in
   //  {
    // 	*out = prev_out;
    // }
+}
+
+// Reentrantna wersja regulatora PI (transformata Tustina, taka sama struktura
+// jak regulatorPI() powyzej) - stan bledu poprzedniego kroku (prev_delta) jest
+// tu parametrem, a nie zmienna globalna, wiec mozna jej bezpiecznie uzywac
+// dla drugiej, NIEZALEZNEJ petli regulacji (korekta fazy IMAX2) rownolegle
+// z istniejaca petla napiecia (regulatorPI/imax1) bez wzajemnego psucia stanu.
+void regulatorPI_r(int32_t *out, int32_t *integral, int32_t *prev_delta_state,
+                    int32_t in, int32_t in_zad, int32_t limp, int32_t limn,
+                    float kp, float ti, float Ts1)
+{
+    int32_t d = in_zad - in; // error
+
+    *integral = (*integral + (int32_t)((d + *prev_delta_state) * ((kp / ti) * Ts1 * 0.5f))); // I part
+    *prev_delta_state = d;
+
+    if (*integral >= limp) // limit peak positive
+    {
+        *integral = limp;
+    }
+    if (*integral <= limn) // limit peak negative
+    {
+        *integral = limn;
+    }
+
+    *out = (int32_t)(d * kp + *integral); // Sum of P and I
+
+    if (*out >= limp) // limit peak positive
+    {
+        *out = limp;
+    }
+    if (*out <= limn) // limit peak negative
+    {
+        *out = limn;
+    }
 }
 
 /*void  BUTTERWORHT_FILTER(float new_sample)
@@ -2317,6 +2423,19 @@ void ParseUSBCommand(void) {
 	            sscanf((char*)USB_RX_Buffer, "SET_IMAX2_SUM %d", &imax2_sum);
 	            SendUSBMessage("imax2_sum Updated\n");
 
+	        } else if (strncmp((char*)USB_RX_Buffer, "SET_PHASE_KP", 12) == 0) {
+	            sscanf((char*)USB_RX_Buffer, "SET_PHASE_KP %f", &Kp_phase);
+	            SendUSBMessage("Kp_phase Updated\n");
+
+	        } else if (strncmp((char*)USB_RX_Buffer, "SET_PHASE_TI", 12) == 0) {
+	            sscanf((char*)USB_RX_Buffer, "SET_PHASE_TI %f", &Ti_phase);
+	            SendUSBMessage("Ti_phase Updated\n");
+
+	        } else if (strncmp((char*)USB_RX_Buffer, "SET_PHASE_LIM", 13) == 0) {
+	            sscanf((char*)USB_RX_Buffer, "SET_PHASE_LIM %ld", &LIM_PHASE_POS);
+	            LIM_PHASE_NEG = -LIM_PHASE_POS;
+	            SendUSBMessage("LIM_PHASE Updated\n");
+
 	        } else if (strncmp((char*)USB_RX_Buffer, "SET_DELAY_TR", 12) == 0) {
 	            sscanf((char*)USB_RX_Buffer, "SET_DELAY_TR %f", &delay_tr);
 	            SendUSBMessage("delay_tr Updated\n");
@@ -2347,6 +2466,18 @@ void ParseUSBCommand(void) {
 
 	        } else if (strncmp((char*)USB_RX_Buffer, "GET_IMAX2_SUM", 13) == 0) {
 	            sprintf((char*)USB_TX_Buffer, "imax2_sum = %f\n", imax2_sum);
+	            SendUSBMessage((char*)USB_TX_Buffer);
+
+	        } else if (strncmp((char*)USB_RX_Buffer, "GET_PHASE_KP", 12) == 0) {
+	            sprintf((char*)USB_TX_Buffer, "Kp_phase = %f\n", Kp_phase);
+	            SendUSBMessage((char*)USB_TX_Buffer);
+
+	        } else if (strncmp((char*)USB_RX_Buffer, "GET_PHASE_TI", 12) == 0) {
+	            sprintf((char*)USB_TX_Buffer, "Ti_phase = %f\n", Ti_phase);
+	            SendUSBMessage((char*)USB_TX_Buffer);
+
+	        } else if (strncmp((char*)USB_RX_Buffer, "GET_PHASE_CORR", 14) == 0) {
+	            sprintf((char*)USB_TX_Buffer, "phase_correction = %ld, imax1 = %ld, imax2 = %ld\n", phase_correction, imax1, imax2);
 	            SendUSBMessage((char*)USB_TX_Buffer);
 
 	        } else if (strncmp((char*)USB_RX_Buffer, "GET_DELAY_TR", 12) == 0) {
