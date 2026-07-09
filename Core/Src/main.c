@@ -306,7 +306,7 @@ volatile uint8_t dataReceivedFlag = 0; // Flags to indicate new data received
 //Regulator PI of voltage
 float Kp = 0.07f; 			// Proportional part of PI
 float Ti = 0.003f; 			// Integral part of PI
-int32_t LIM_PEAK_STARTUP = 2000;  // 5 A
+int32_t LIM_PEAK_STARTUP = 4000;  // 5 A
 int32_t LIM_PEAK_NORMAL  = 10000; // 12 A
 int32_t LIM_PEAK_POS = 10000; 	// Positive limit for PI regulator [mA]
 int32_t LIM_PEAK_NEG = 0; 	// Negative limit for PI regulator [mA]
@@ -631,15 +631,14 @@ int main(void)
 	  	                	if(once == 0)
 	  	                		{
 	  	                		//Start timer that start_program ramp and pi regulation
-	  	                		//Vramp = output_voltage;
 	  	                		    RAMP_FINISHED = 0;
 	  	                		    Integral_I = 0;
 	  	                		    prev_delta = 0;
 	  	                		    Integral_phase = 0;
 	  	                		    prev_delta_phase = 0;
-	  	                		 // Vramp_f = 1;
 	  	                		  delay_tr_freq = 10e6f;
 	  	                		  delay_hc_freq = 10e6f;
+	  	                		  LIM_PEAK_POS = LIM_PEAK_STARTUP;
 	  	                		HAL_GPIO_WritePin(RESET_FPGA_GPIO_Port, RESET_FPGA_Pin, 0); // RESET =  0  = reset turn off
 	  	                		HAL_TIM_Base_Start_IT(&htim15); // START TIM15 THATS IS MAIN CONTROL LOOP
 	  	                		HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
@@ -720,24 +719,30 @@ int main(void)
 	  	                					  	   }
 	  	                				}
 	  	                		  	  	}
+	  	                		  	  	} // koniec bloku Gv/delay_tr/delay_hc (kosztowny, tylko gdy trzeba) - regulacja pradu ponizej dziala ZAWSZE
 	  	                				if(RAMP_FINISHED == 0)
 	  	                				{
-	  	                					if(once == 0){
-	  	                						Vramp_f = output_voltage + 5000;
-												Vramp = output_voltage + 5000;
-	  	                					}
+	  	                					// Bez sztucznej rampy - PI celuje w vref od pierwszego ticku.
+	  	                					// LIM_PEAK_STARTUP jest tu tylko sufitem bezpieczenstwa (nasycenie
+	  	                					// PI), a NIE mechanizmem soft-startu - dzieki temu ksztalt podejscia
+	  	                					// do vref zalezy od Kp/Ti (stale, raz wystrojone), a nie od wybranej
+	  	                					// wartosci LIM_PEAK_STARTUP -> koniec z recznym strojeniem za kazdym
+	  	                					// razem gdy zmienisz limit pradu startowego.
 	  	                					if(once == 0) Update_PWM_Frequency(&htim8, TIM_CHANNEL_2, delay_tr_freq);
 	  	                					if(once == 0) Update_PWM_Frequency(&htim1, TIM_CHANNEL_1, delay_hc_freq);
-
-	  	                					Vramp = RAMP(Vramp, vref, 10000, Ts); //160000 Adding to Vramp stepping voltage to create starting ramp  21 07 2025 was 160000 rate
 	  	                					LIM_PEAK_POS = LIM_PEAK_STARTUP;
+
+	  	                					if(output_vol >= vref - 50) // blisko celu -> odblokuj Gv/delay_tr/delay_hc i pelny zakres pradu
+	  	                					{
+	  	                						RAMP_FINISHED = 1;
+	  	                					}
 	  	                				}
 	  	                				else
 	  	                				{
 	  	                					LIM_PEAK_POS = LIM_PEAK_NORMAL;
 	  	                				}
 
-	  	                				if (Vramp > 0 ) regulatorPI(&imax1, &Integral_I, output_vol, Vramp, LIM_PEAK_POS, LIM_PEAK_NEG, Kp, Ti, Ts);
+	  	                				regulatorPI(&imax1, &Integral_I, output_vol, vref, LIM_PEAK_POS, LIM_PEAK_NEG, Kp, Ti, Ts);
 
 
 
@@ -765,12 +770,6 @@ int main(void)
 	  	                					HAL_GPIO_WritePin(START_STOP_FPGA_GPIO_Port, START_STOP_FPGA_Pin, 1); // START FPGA DANCE
 	  	                					once = 1;
 	  	                				}
-	  	                		  	  	}
-	  	                		  	  	else
-	  	                		  	  	{
-
-	  	                				flag_control = 0;
-	  	                		  	  	}
 
 	  	                	  }
 
