@@ -263,6 +263,13 @@ float delay_tr_freq_ACC = 1;
 float delay_hc_freq_ACC = 1;
 float Gv = 1;
 float Gv_prev = 1;
+uint8_t gv_mode_ge2 = 0; // 0 = uzywamy wzoru dla Gv<2, 1 = uzywamy wzoru dla Gv>=2 (z histereza, patrz nizej)
+float GV_HYST_BAND = 0.05f; // margines wokol progu Gv=2, zeby uniknac przeskakiwania trybu na szumie pomiaru
+float GV_ZVS_ENABLE_THRESHOLD = 1.7f; // imin liczony tylko gdy Gv wyraznie ponizej 2 (realny zapas ujemnego
+                                       // pradu) - blisko granicy Gv=2 margines jest naturalnie za maly,
+                                       // wiec tam wymuszamy imin=0 niezaleznie od wzoru. Do dostrojenia na sprzecie.
+uint32_t gv_mode_last_switch_tick = 0; // HAL_GetTick() ostatniej zmiany trybu
+uint32_t GV_MODE_MIN_DWELL_MS = 10; // min. czas w danym trybie zanim wolno przelaczyc ponownie (debounce)
 //Filter butterworth 500khz sampleing rate 200khz cutoff
 /*#define N 4 // Order of the filter
 float x[N+1] = {0}; // Input samples
@@ -310,6 +317,9 @@ int32_t LIM_PEAK_STARTUP = 4000;  // 5 A
 int32_t LIM_PEAK_NORMAL  = 10000; // 12 A
 int32_t LIM_PEAK_POS = 10000; 	// Positive limit for PI regulator [mA]
 int32_t LIM_PEAK_NEG = 0; 	// Negative limit for PI regulator [mA]
+uint32_t STARTUP_TIMEOUT_MS = 500; // jesli po tym czasie output_vol nie dojdzie do vref-50 (np. za ciezkie obciazenie
+                                    // na LIM_PEAK_STARTUP), i tak odblokuj LIM_PEAK_NORMAL zamiast utykac na stale
+uint32_t startup_entry_tick = 0;   // HAL_GetTick() z chwili wejscia w faze RAMP_FINISHED==0
 int32_t LIM_INTEGRAL_I_POS = 8000;
 int32_t LIM_INTEGRAL_I_NEG = 0;
 int32_t Integral_I = 0;		// Integral part of PI
@@ -639,6 +649,7 @@ int main(void)
 	  	                		  delay_tr_freq = 10e6f;
 	  	                		  delay_hc_freq = 10e6f;
 	  	                		  LIM_PEAK_POS = LIM_PEAK_STARTUP;
+	  	                		  startup_entry_tick = HAL_GetTick();
 	  	                		HAL_GPIO_WritePin(RESET_FPGA_GPIO_Port, RESET_FPGA_Pin, 0); // RESET =  0  = reset turn off
 	  	                		HAL_TIM_Base_Start_IT(&htim15); // START TIM15 THATS IS MAIN CONTROL LOOP
 	  	                		HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
@@ -668,21 +679,47 @@ int main(void)
 	  	                		  	  	//{
 	  	                		  	  	if(RAMP_FINISHED)
 	  	                		  	  	{
-	  	                				if(Gv<2) //CZARY
+	  	                				// Histereza + debounce czasowy - zapobiega przeskakiwaniu miedzy
+	  	                				// wzorami w rytm szumu/oscylacji pomiaru blisko Gv=2.
+	  	                				if(!gv_mode_ge2 && Gv >= 2.0f + GV_HYST_BAND && (HAL_GetTick()-gv_mode_last_switch_tick) >= GV_MODE_MIN_DWELL_MS)
+	  	                				{
+	  	                					gv_mode_ge2 = 1;
+	  	                					gv_mode_last_switch_tick = HAL_GetTick();
+	  	                				}
+	  	                				else if(gv_mode_ge2 && Gv < 2.0f - GV_HYST_BAND && (HAL_GetTick()-gv_mode_last_switch_tick) >= GV_MODE_MIN_DWELL_MS)
+	  	                				{
+	  	                					gv_mode_ge2 = 0;
+	  	                					gv_mode_last_switch_tick = HAL_GetTick();
+	  	                				}
+
+	  	                				if(!gv_mode_ge2) //CZARY
 	  	                				{
 
 	  	                					delay_tr = (approx_acos2((1-Gv))*INV_wr)*delay_tr_factor;
 	  	                					 // start_ticks = SysTick->VAL;
 
-	  	                					cordic_input = float_to_integer(((2-Gv)/Gv), 100, 32);
+	  	                					float sqrt_arg = (2.0f-Gv)/Gv; // wzor zakłada Gv<2 - w pasmie histerezy/przy szumie
+	  	                					// Gv moze chwilowo byc >=2 mimo ze wciaz jestesmy w tej galezi;
+	  	                					// bez tego zabezpieczenia ujemny argument leci do float_to_integer(),
+	  	                					// ktore rzutuje float na uint32_t (UB dla wartosci ujemnych) -> smieciowy
+	  	                					// wynik z CORDIC -> po przycieciu wychodzi falszywe imin=4000mA.
+	  	                					if(sqrt_arg < 0.0f) sqrt_arg = 0.0f;
+
+	  	                					cordic_input = float_to_integer(sqrt_arg, 100, 32);
 	  	                					HAL_CORDIC_Calculate(&hcordic, &cordic_input, &result_q31, 1, 100);//sqrt((2-Gv)/Gv))
 	  	                					resultcordic = integer_to_float(result_q31, 10, 1, 32); // result of sqrt((((2-Gv)/Gv)) ) in float
 
 
 	  	                					imin = (int)(Imin_Factor*output_vol*resultcordic*INV_Z); //[mA] Negative current needed to Zero voltage switching in resonance
 
+	  	                					// Blisko granicy Gv=2 naturalny zapas ujemnego pradu jest za maly,
+	  	                					// wiec nawet mala wartosc imin>0 tam nie jest w praktyce nieznacznie
+	  	                					// (i moze trzymac FSM w T23A_STATE dluzej -> zapad napiecia).
+	  	                					// Dopiero wyraznie w glab regionu Gv<2 wlaczamy realny ZVS.
+	  	                					if(Gv >= GV_ZVS_ENABLE_THRESHOLD) imin = 0;
+
 	  	                					if(imin>4000) imin = 4000;
-	  	                				} else if(Gv >= 2)
+	  	                				} else
 	  	                				{
 	  	                					delay_tr = ((M_PI-approx_acos2((1/(Gv-1)))) * INV_wr)*delay_tr_factor;
 	  	                					imin = 0;
@@ -732,7 +769,7 @@ int main(void)
 	  	                					if(once == 0) Update_PWM_Frequency(&htim1, TIM_CHANNEL_1, delay_hc_freq);
 	  	                					LIM_PEAK_POS = LIM_PEAK_STARTUP;
 
-	  	                					if(output_vol >= vref - 50) // blisko celu -> odblokuj Gv/delay_tr/delay_hc i pelny zakres pradu
+	  	                					if(output_vol >= vref - 50 || (HAL_GetTick() - startup_entry_tick) >= STARTUP_TIMEOUT_MS) // blisko celu ALBO timeout -> odblokuj Gv/delay_tr/delay_hc i pelny zakres pradu
 	  	                					{
 	  	                						RAMP_FINISHED = 1;
 	  	                					}
@@ -2443,6 +2480,14 @@ void ParseUSBCommand(void) {
 	            sscanf((char*)USB_RX_Buffer, "SET_DELAY_HC %f", &delay_hc);
 	            SendUSBMessage("delay_hc Updated\n");
 
+	        } else if (strncmp((char*)USB_RX_Buffer, "SET_STARTUP_TIMEOUT", 20) == 0) {
+	            sscanf((char*)USB_RX_Buffer, "SET_STARTUP_TIMEOUT %lu", &STARTUP_TIMEOUT_MS);
+	            SendUSBMessage("STARTUP_TIMEOUT_MS Updated\n");
+
+	        } else if (strncmp((char*)USB_RX_Buffer, "GET_STARTUP_TIMEOUT", 20) == 0) {
+	            sprintf((char*)USB_TX_Buffer, "STARTUP_TIMEOUT_MS = %lu\n", STARTUP_TIMEOUT_MS);
+	            SendUSBMessage((char*)USB_TX_Buffer);
+
 	        } else if (strncmp((char*)USB_RX_Buffer, "GET_KP", 6) == 0) {
 	            sprintf((char*)USB_TX_Buffer, "KP = %f\n", Kp);
 	            SendUSBMessage((char*)USB_TX_Buffer);
@@ -2612,43 +2657,70 @@ void DisplayAllVariables(void) {
         sprintf(buffer, "Ti = %f\n", Ti);
         SendUSBMessage(buffer);
 
-        sprintf(buffer, "vref = %hu\n", vref);
+        sprintf(buffer, "vref = %lu\n", (unsigned long)vref);
         SendUSBMessage(buffer);
 
-        sprintf(buffer, "imax1 = %f\n", imax1);
+        sprintf(buffer, "imax1 = %ld\n", (long)imax1);
         SendUSBMessage(buffer);
 
-        sprintf(buffer, "imax2 = %f\n", imax2);
+        sprintf(buffer, "imax2 = %ld\n", (long)imax2);
         SendUSBMessage(buffer);
 
-        sprintf(buffer, "imin = %f\n", imin);
+        sprintf(buffer, "imin = %lu\n", (unsigned long)imin);
         SendUSBMessage(buffer);
 
-        sprintf(buffer, "input_voltage = %f\n", input_voltage);
+        sprintf(buffer, "input_voltage(raw) = %lu\n", (unsigned long)input_voltage);
         SendUSBMessage(buffer);
 
-        sprintf(buffer, "output_voltage = %f\n", output_voltage);
+        sprintf(buffer, "output_voltage(raw) = %lu\n", (unsigned long)output_voltage);
         SendUSBMessage(buffer);
 
-        sprintf(buffer, "pcb_temp = %f\n", pcb_temp);
+        sprintf(buffer, "input_vol(filtered) = %lu\n", (unsigned long)input_vol);
         SendUSBMessage(buffer);
 
-        sprintf(buffer, "heat_sink_temp = %f\n", heat_sink_temp);
+        sprintf(buffer, "output_vol(filtered) = %lu\n", (unsigned long)output_vol);
         SendUSBMessage(buffer);
 
-        sprintf(buffer, "current_sensor1_vref = %f\n", current_sensor1_vref);
+        sprintf(buffer, "pcb_temp = %lu\n", (unsigned long)pcb_temp);
         SendUSBMessage(buffer);
 
-        sprintf(buffer, "current_sensor2_vref = %f\n", current_sensor2_vref);
+        sprintf(buffer, "heat_sink_temp = %lu\n", (unsigned long)heat_sink_temp);
         SendUSBMessage(buffer);
 
-        sprintf(buffer, "imax2_sum = %f\n", imax2_sum);
+        sprintf(buffer, "current_sensor1_vref = %u\n", (unsigned)current_sensor1_vref);
+        SendUSBMessage(buffer);
+
+        sprintf(buffer, "current_sensor2_vref = %u\n", (unsigned)current_sensor2_vref);
+        SendUSBMessage(buffer);
+
+        sprintf(buffer, "imax2_sum = %d\n", (int)imax2_sum);
         SendUSBMessage(buffer);
 
         sprintf(buffer, "delay_tr = %f\n", delay_tr);
         SendUSBMessage(buffer);
 
         sprintf(buffer, "delay_hc = %f\n", delay_hc);
+        SendUSBMessage(buffer);
+
+        sprintf(buffer, "Integral_I = %ld\n", (long)Integral_I);
+        SendUSBMessage(buffer);
+
+        sprintf(buffer, "delta(vref-output_vol) = %ld\n", (long)delta);
+        SendUSBMessage(buffer);
+
+        sprintf(buffer, "Gv(output_vol/input_vol) = %f\n", Gv);
+        SendUSBMessage(buffer);
+
+        sprintf(buffer, "RAMP_FINISHED = %u\n", (unsigned)RAMP_FINISHED);
+        SendUSBMessage(buffer);
+
+        sprintf(buffer, "LIM_PEAK_POS = %ld\n", (long)LIM_PEAK_POS);
+        SendUSBMessage(buffer);
+
+        sprintf(buffer, "Integral_phase = %ld\n", (long)Integral_phase);
+        SendUSBMessage(buffer);
+
+        sprintf(buffer, "phase_correction = %ld\n", (long)phase_correction);
         SendUSBMessage(buffer);
 }
 
