@@ -241,11 +241,16 @@ uint16_t adc3_moving_average[5][MA_WINDOW_SIZE];
  * 3 - PCB temperature (MCP9700)
  * 4 - Heatsink Temprature (TMP236)
  */
-uint32_t vref = 48000; 			//[mV]  Reference voltage its compare to output voltage
+uint32_t vref = 48500; 			//[mV]  Reference voltage its compare to output voltage
 //uint32_t step_size = 2000;
 volatile uint32_t output_voltage = 1; 	// Measured voltage 0.2V BIAS
 int32_t vout = 1; 				//Voltage comparing to vref
 int32_t Vramp = 1; 			// ramp voltage
+int32_t Ramp_ratio_mVs = 40000; // [mV/s] tempo rampy startowej -> przy 48000mV daje ok. 300ms rampy.
+                                  // Dostrojenie: Ramp_ratio_mVs = vref[mV] / pozadany_czas_startu[s].
+                                  // Wolniej = mniejszy blad sledzenia PI = mniejsze ryzyko przeregulowania,
+                                  // ale dluzszy start. Zacznij od tej wartosci i wydluzaj rampe (mniejszy
+                                  // Ramp_ratio_mVs) jesli nadal widac przeregulowanie na koncu.
 volatile static uint16_t adc4_dma_buffer[2];
 volatile static uint16_t adc4_measurments;
 int32_t RAMP(int32_t Vout, int32_t Vref, int32_t Ramp_ratio, float period_loop);
@@ -264,9 +269,9 @@ float delay_hc_freq_ACC = 1;
 float Gv = 1;
 float Gv_prev = 1;
 uint8_t gv_mode_ge2 = 0; // 0 = uzywamy wzoru dla Gv<2, 1 = uzywamy wzoru dla Gv>=2 (z histereza, patrz nizej)
-float GV_HYST_BAND = 0.05f; // margines wokol progu Gv=2, zeby uniknac przeskakiwania trybu na szumie pomiaru
+float GV_HYST_BAND = 0.1f; // margines wokol progu Gv=2, zeby uniknac przeskakiwania trybu na szumie pomiaru
 float GV_ZVS_ENABLE_THRESHOLD = 1.7f; // imin liczony tylko gdy Gv wyraznie ponizej 2 (realny zapas ujemnego
-                                       // pradu) - blisko granicy Gv=2 margines jest naturalnie za maly,
+float GV_ROUND_BAND = 0.1f;                                      // pradu) - blisko granicy Gv=2 margines jest naturalnie za maly,
                                        // wiec tam wymuszamy imin=0 niezaleznie od wzoru. Do dostrojenia na sprzecie.
 uint32_t gv_mode_last_switch_tick = 0; // HAL_GetTick() ostatniej zmiany trybu
 uint32_t GV_MODE_MIN_DWELL_MS = 10; // min. czas w danym trybie zanim wolno przelaczyc ponownie (debounce)
@@ -311,13 +316,16 @@ volatile uint8_t dataReceivedFlag = 0; // Flags to indicate new data received
 
 
 //Regulator PI of voltage
-float Kp = 0.07f; 			// Proportional part of PI
-float Ti = 0.003f; 			// Integral part of PI
+float Kp = 0.09f; 			// Proportional part of PI
+float Ti = 0.001f; 			// Integral part of PI
 int32_t LIM_PEAK_STARTUP = 4000;  // 5 A
 int32_t LIM_PEAK_NORMAL  = 10000; // 12 A
 int32_t LIM_PEAK_POS = 10000; 	// Positive limit for PI regulator [mA]
 int32_t LIM_PEAK_NEG = 0; 	// Negative limit for PI regulator [mA]
-uint32_t STARTUP_TIMEOUT_MS = 500; // jesli po tym czasie output_vol nie dojdzie do vref-50 (np. za ciezkie obciazenie
+uint32_t STARTUP_TIMEOUT_MS = 6000; // MUSI byc wyraznie wieksze niz zamierzony czas rampy (Ramp_ratio_mVs) -
+                                    // to tylko awaryjny watchdog (np. gdyby cos zablokowalo RAMP()), nie normalny
+                                    // mechanizm konczenia startu. Przy domyslnym Ramp_ratio_mVs=160000 (~300ms
+                                    // rampy) 800ms daje bezpieczny zapas. jesli po tym czasie output_vol nie dojdzie do vref-50 (np. za ciezkie obciazenie
                                     // na LIM_PEAK_STARTUP), i tak odblokuj LIM_PEAK_NORMAL zamiast utykac na stale
 uint32_t startup_entry_tick = 0;   // HAL_GetTick() z chwili wejscia w faze RAMP_FINISHED==0
 int32_t LIM_INTEGRAL_I_POS = 8000;
@@ -646,6 +654,8 @@ int main(void)
 	  	                		    prev_delta = 0;
 	  	                		    Integral_phase = 0;
 	  	                		    prev_delta_phase = 0;
+	  	                		    Vramp = 0;
+	  	                		    Vramp_f = 0.0f;
 	  	                		  delay_tr_freq = 10e6f;
 	  	                		  delay_hc_freq = 10e6f;
 	  	                		  LIM_PEAK_POS = LIM_PEAK_STARTUP;
@@ -664,7 +674,7 @@ int main(void)
 	  	                		  	  	input_vol = (int32_t)Low_pass_filter(input_voltage, input_vol); //input_voltage;
 	  	                		  	  	output_vol = (int32_t)Low_pass_filter(output_voltage, output_vol); //output_voltage;
 	  	                		  	  	 //yfilter[1] = a*yfilter[];
-
+	  	                		  	  	if(once == 0) Vramp_f = output_voltage;
 	  	                		  	  	if(output_vol>2*vref || output_vol > 1e6 )// [mV]
 	  	                		  	  	{
 	  	                		  	  	 currentState = STATE_FAULT;
@@ -675,7 +685,8 @@ int main(void)
 	  	                		  	  	if(rel_output_voltage_error > OUTPUT_TOLERANCE || RAMP_FINISHED  == 0){
 
 	  	                		  	  	Gv = (float)output_vol/(float)input_vol;//output_voltage/input_voltage;
-	  	                		  	  	//if(abs(Gv-Gv_prev)>=0.02)
+
+	  	                		  		if(fabsf(Gv - 2.0f) <= GV_ROUND_BAND) Gv = 2.0f; // przyciagniecie do dokladnie 2 w waskim pasmie
 	  	                		  	  	//{
 	  	                		  	  	if(RAMP_FINISHED)
 	  	                		  	  	{
@@ -759,17 +770,31 @@ int main(void)
 	  	                		  	  	} // koniec bloku Gv/delay_tr/delay_hc (kosztowny, tylko gdy trzeba) - regulacja pradu ponizej dziala ZAWSZE
 	  	                				if(RAMP_FINISHED == 0)
 	  	                				{
-	  	                					// Bez sztucznej rampy - PI celuje w vref od pierwszego ticku.
-	  	                					// LIM_PEAK_STARTUP jest tu tylko sufitem bezpieczenstwa (nasycenie
-	  	                					// PI), a NIE mechanizmem soft-startu - dzieki temu ksztalt podejscia
-	  	                					// do vref zalezy od Kp/Ti (stale, raz wystrojone), a nie od wybranej
-	  	                					// wartosci LIM_PEAK_STARTUP -> koniec z recznym strojeniem za kazdym
-	  	                					// razem gdy zmienisz limit pradu startowego.
+	  	                					// Rampa napieciowa: PI caly czas sledzi Vramp (nie skacze na sztywno
+	  	                					// do vref), wiec blad pozostaje maly przez caly czas trwania startu -
+	  	                					// eliminuje to poczatkowy "strzal" prądu/przeregulowanie napiecia,
+	  	                					// bo integrator nigdy nie musi nadrabiac duzego, jednorazowego skoku.
+	  	                					// LIM_PEAK_STARTUP zostaje jako dodatkowy sufit bezpieczenstwa.
 	  	                					if(once == 0) Update_PWM_Frequency(&htim8, TIM_CHANNEL_2, delay_tr_freq);
 	  	                					if(once == 0) Update_PWM_Frequency(&htim1, TIM_CHANNEL_1, delay_hc_freq);
+
 	  	                					LIM_PEAK_POS = LIM_PEAK_STARTUP;
 
-	  	                					if(output_vol >= vref - 50 || (HAL_GetTick() - startup_entry_tick) >= STARTUP_TIMEOUT_MS) // blisko celu ALBO timeout -> odblokuj Gv/delay_tr/delay_hc i pelny zakres pradu
+	  	                					// Rampa rusza dopiero gdy FPGA realnie juz przelacza (once==1) -
+	  	                					// wczesniej (once==0, przed START_STOP_FPGA_Pin=1) output_vol i tak
+	  	                					// jest ~0, wiec przesuwanie Vramp przed tym momentem tylko budowaloby
+	  	                					// sztuczny blad, ktory i tak trzeba by pozniej nadrabiac.
+	  	                					if(once == 1)
+	  	                					{
+	  	                						Vramp = RAMP(Vramp, vref, Ramp_ratio_mVs, Ts); // RAMP() sam ustawia RAMP_FINISHED=1 po dojsciu do vref
+	  	                					}
+
+	  	                					// Niezalezny watchdog na wypadek gdyby cos zablokowalo postep rampy -
+	  	                					// ustaw STARTUP_TIMEOUT_MS wyraznie dluzej niz zamierzony czas rampy
+	  	                					// (Ramp_ratio_mVs), inaczej timeout odpali sie w trakcie normalnej,
+	  	                					// powolnej rampy i przedwczesnie odblokuje Gv/delay_tr/imin zanim
+	  	                					// napiecie faktycznie dojdzie do celu.
+	  	                					if((HAL_GetTick() - startup_entry_tick) >= STARTUP_TIMEOUT_MS)
 	  	                					{
 	  	                						RAMP_FINISHED = 1;
 	  	                					}
@@ -779,7 +804,7 @@ int main(void)
 	  	                					LIM_PEAK_POS = LIM_PEAK_NORMAL;
 	  	                				}
 
-	  	                				regulatorPI(&imax1, &Integral_I, output_vol, vref, LIM_PEAK_POS, LIM_PEAK_NEG, Kp, Ti, Ts);
+	  	                				regulatorPI(&imax1, &Integral_I, output_vol, Vramp, LIM_PEAK_POS, LIM_PEAK_NEG, Kp, Ti, Ts);
 
 
 
@@ -794,11 +819,11 @@ int main(void)
 	  	                				imax2 = imax1 + phase_correction;
 
 	  	                				if(once == 0){
-	  	                					imax1 = LIM_PEAK_STARTUP;                 // ustaw limit PRZED startem
-	  	                					    HAL_DAC_SetValue(&hdac1, DAC_CHANNEL_1, DAC_ALIGN_12B_R,
-	  	                					                      current_sensor1_vref + (int32_t)(imax1*0.025));
-	  	                					    HAL_DAC_SetValue(&hdac1, DAC_CHANNEL_2, DAC_ALIGN_12B_R,
-	  	                					                      current_sensor2_vref + (int32_t)(imax1*0.025));
+	  	                					//imax1 = LIM_PEAK_STARTUP;                 // ustaw limit PRZED startem
+	  	                					//    HAL_DAC_SetValue(&hdac1, DAC_CHANNEL_1, DAC_ALIGN_12B_R,
+	  	                					//                      current_sensor1_vref + (int32_t)(imax1*0.025));
+	  	                					 //   HAL_DAC_SetValue(&hdac1, DAC_CHANNEL_2, DAC_ALIGN_12B_R,
+	  	                					 //                     current_sensor2_vref + (int32_t)(imax1*0.025));
 
 	  	                					    // realne oczekiwanie na ustalenie analogu, nie 100ms "na czuja"
 	  	                					    // sprawdź na oscylo ile faktycznie trzeba i wstaw tu ten czas
@@ -2269,7 +2294,7 @@ int32_t RAMP(int32_t Vout, int32_t Vref, int32_t Ramp_ratio, float period_loop)
         Vout = (int32_t)Vramp_f;
     }
 
-    if (Vout >= Vref - 50)
+    if (Vout >= Vref)
     {
         Vout = Vref;
         Vramp_f = Vref;   // ważne: zsynchronizuj akumulator, żeby nie było skoku przy kolejnym starcie
