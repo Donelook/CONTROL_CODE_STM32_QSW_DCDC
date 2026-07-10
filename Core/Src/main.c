@@ -272,7 +272,9 @@ uint8_t gv_mode_ge2 = 0; // 0 = uzywamy wzoru dla Gv<2, 1 = uzywamy wzoru dla Gv
 float GV_HYST_BAND = 0.1f; // margines wokol progu Gv=2, zeby uniknac przeskakiwania trybu na szumie pomiaru
 float GV_ZVS_ENABLE_THRESHOLD = 1.7f; // imin liczony tylko gdy Gv wyraznie ponizej 2 (realny zapas ujemnego
 float GV_ROUND_BAND = 0.1f;                                      // pradu) - blisko granicy Gv=2 margines jest naturalnie za maly,
-                                       // wiec tam wymuszamy imin=0 niezaleznie od wzoru. Do dostrojenia na sprzecie.
+
+uint8_t HARD_SWITCHING_OFF = 1;
+// wiec tam wymuszamy imin=0 niezaleznie od wzoru. Do dostrojenia na sprzecie.
 uint32_t gv_mode_last_switch_tick = 0; // HAL_GetTick() ostatniej zmiany trybu
 uint32_t GV_MODE_MIN_DWELL_MS = 10; // min. czas w danym trybie zanim wolno przelaczyc ponownie (debounce)
 //Filter butterworth 500khz sampleing rate 200khz cutoff
@@ -316,7 +318,7 @@ volatile uint8_t dataReceivedFlag = 0; // Flags to indicate new data received
 
 
 //Regulator PI of voltage
-float Kp = 0.09f; 			// Proportional part of PI
+float Kp = 0.03f; 			// Proportional part of PI
 float Ti = 0.001f; 			// Integral part of PI
 int32_t LIM_PEAK_STARTUP = 4000;  // 5 A
 int32_t LIM_PEAK_NORMAL  = 10000; // 12 A
@@ -688,7 +690,7 @@ int main(void)
 
 	  	                		  		if(fabsf(Gv - 2.0f) <= GV_ROUND_BAND) Gv = 2.0f; // przyciagniecie do dokladnie 2 w waskim pasmie
 	  	                		  	  	//{
-	  	                		  	  	if(RAMP_FINISHED)
+	  	                		  	  	if(RAMP_FINISHED && HARD_SWITCHING_OFF)
 	  	                		  	  	{
 	  	                				// Histereza + debounce czasowy - zapobiega przeskakiwaniu miedzy
 	  	                				// wzorami w rytm szumu/oscylacji pomiaru blisko Gv=2.
@@ -822,8 +824,8 @@ int main(void)
 	  	                					//imax1 = LIM_PEAK_STARTUP;                 // ustaw limit PRZED startem
 	  	                					//    HAL_DAC_SetValue(&hdac1, DAC_CHANNEL_1, DAC_ALIGN_12B_R,
 	  	                					//                      current_sensor1_vref + (int32_t)(imax1*0.025));
-	  	                					 //   HAL_DAC_SetValue(&hdac1, DAC_CHANNEL_2, DAC_ALIGN_12B_R,
-	  	                					 //                     current_sensor2_vref + (int32_t)(imax1*0.025));
+	  	                					//    HAL_DAC_SetValue(&hdac1, DAC_CHANNEL_2, DAC_ALIGN_12B_R,
+	  	                					//                      current_sensor2_vref + (int32_t)(imax1*0.025));
 
 	  	                					    // realne oczekiwanie na ustalenie analogu, nie 100ms "na czuja"
 	  	                					    // sprawdź na oscylo ile faktycznie trzeba i wstaw tu ten czas
